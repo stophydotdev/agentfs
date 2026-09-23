@@ -48,6 +48,8 @@ Or ask your agent: "Upload report.pdf and give me a link."
 
 `upload` also works before `login`, for a quick share: files up to 100 MB, unlisted, with links that expire in 24 hours. Log in to keep files.
 
+Logged in, files over 16 MB go up in parts, six at a time, and each part retries on its own. If an upload stops, run the same command again: it picks up where it left off.
+
 Run `agentfs <command> --help` for options. Add `--json` to any command for JSON output.
 
 ## Links
