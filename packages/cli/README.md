@@ -1,61 +1,48 @@
 # agentfs
 
-Cloud storage for AI agents, from the terminal. Upload a file, get a link.
+Cloud storage for AI agents. Upload a file, get a link.
+
+## Get started
 
 ```bash
-npm install -g agentfs
-agentfs login
-agentfs upload ./report.pdf
+npx -y @agentfs/cli@latest init --all --browser
 ```
 
-```
-reports/report.pdf  2.3 MB  unlisted
-https://f.agentfs.cloud/f/f_8f2c
-```
+This installs the CLI, logs you in, and teaches your AI agents to use AgentFS.
 
-## Give your agents AgentFS
+## Use it
 
 ```bash
-agentfs setup
+agentfs upload report.pdf                      # get a link
+agentfs upload data.csv --visibility private   # keep it private
+agentfs share <id> --expires-in 1h             # link that expires
+agentfs ls                                     # your files
+agentfs download <id>                          # get a file back
 ```
 
-This installs the `agentfs` skill for Claude Code (`~/.claude/skills`) and for agents that read `~/.agents/skills` (Codex, Cursor, OpenCode and others), and adds the hosted MCP server to Claude Code, Cursor and OpenCode. Pass `--local` to install the skill into the current project instead, `skills` or `mcp` to do one part, and `--remove` to undo.
+Or ask your agent: "Upload report.pdf and give me a link."
 
 ## Commands
 
-| Command | What it does |
+| Command | |
 | --- | --- |
-| `agentfs login` | Log in with your browser. `--api-key afs_...` saves a key instead. |
-| `agentfs logout` | Remove the saved key. |
-| `agentfs status` | Version, login and account. Same as `agentfs --status`. |
-| `agentfs upload <file...>` | Upload files. `--project`, `--path`, `--prefix`, `--visibility`, `--expires-in`, `--replace`, `--run-id`. |
-| `agentfs ls` | List files. `--project`, `--prefix`, `--path`, `--query`, `--run-id`, `--limit`, `--cursor`. |
-| `agentfs get <id>` | Show one file. |
-| `agentfs download <id>` | Download a file. `-o` sets the path. |
-| `agentfs mv <id> <name>` | Rename a file. The id and link stay the same. |
-| `agentfs rm <id...>` | Move to the trash. `--permanent` deletes now. |
-| `agentfs share <id>` | Time-limited link for a private file. `--expires-in 1h`. |
-| `agentfs projects` | List projects. `create <name>`, `rm <name>`. |
-| `agentfs env` | Write `AGENTFS_KEY` into `.env`. |
-| `agentfs setup` | Install the skill and MCP server into your agents. |
+| `init` | Set up everything in one go |
+| `login` / `logout` | Log in with your browser, or log out |
+| `status` | Show your account |
+| `upload <file...>` | Upload files and get links |
+| `ls` | List your files |
+| `get <id>` | Show one file |
+| `download <id>` | Download a file |
+| `share <id>` | Link to a private file |
+| `mv <id> <name>` | Rename a file |
+| `rm <id...>` | Delete files |
+| `projects` | List or create projects |
+| `config` | Show where your login is saved |
+| `setup` | Add AgentFS to your AI agents |
 
-Files up to 100 MiB upload in one request. Larger files use a resumable session that sends parts straight to storage.
+Run `agentfs <command> --help` for options. Add `--json` to any command for JSON output.
 
-## Output
+## Links
 
-On a terminal the output is short and readable. When piped, or with `--json`, every command prints JSON, and failures print `{ "success": false, "error": { "code", "message" } }` with exit code 1.
-
-## Configuration
-
-The key is read from `--api-key`, then `AGENTFS_KEY`, then `~/.config/agentfs/config.json` (written by `agentfs login`, readable only by you). Set `NO_COLOR=1` to turn colors off.
-
-## Development
-
-```bash
-bun install
-bun run dev -- status
-bun test
-bun run build
-```
-
-`AGENTFS_API_URL=http://localhost:3000` points the CLI at a local `agentfs-app` dev server.
+- [agentfs.cloud](https://agentfs.cloud)
+- [Docs](https://docs.agentfs.cloud)

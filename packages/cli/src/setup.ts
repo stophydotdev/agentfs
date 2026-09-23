@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
@@ -12,9 +12,9 @@ export type Outcome = "added" | "updated" | "already set" | "removed" | "not set
 
 export function bundledSkill(name: string) {
   const here = dirname(fileURLToPath(import.meta.url));
-  const path = [join(here, "skills", name, "SKILL.md"), join(here, "..", "..", "..", "skills", name, "SKILL.md")].find(existsSync);
-  if (!path) throw new Error(`The bundled ${name} skill is missing from this install.`);
-  return readFileSync(path, "utf8");
+  const dir = [join(here, "skills", name), join(here, "..", "..", "..", "skills", name)].find((path) => existsSync(join(path, "SKILL.md")));
+  if (!dir) throw new Error(`The bundled ${name} skill is missing from this install.`);
+  return dir;
 }
 
 export function skillRoots(scope: { global: boolean; cwd: string; home: string }) {
@@ -22,18 +22,31 @@ export function skillRoots(scope: { global: boolean; cwd: string; home: string }
   return [join(base, ".claude", "skills"), join(base, ".agents", "skills")];
 }
 
-export function applySkill(root: string, name: string, remove: boolean, content = bundledSkill(name)): Outcome {
-  const path = join(root, name, "SKILL.md");
+function filesIn(dir: string): Map<string, string> {
+  const files = new Map<string, string>();
+  for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const path = join(entry.parentPath, entry.name);
+    files.set(relative(dir, path), readFileSync(path, "utf8"));
+  }
+  return files;
+}
+
+const sameFiles = (a: Map<string, string>, b: Map<string, string>) =>
+  a.size === b.size && [...a].every(([path, content]) => b.get(path) === content);
+
+export function applySkill(root: string, name: string, remove: boolean, source = bundledSkill(name)): Outcome {
+  const target = join(root, name);
+  const installed = existsSync(join(target, "SKILL.md"));
   if (remove) {
-    if (!existsSync(path)) return "not set";
-    rmSync(dirname(path), { recursive: true, force: true });
+    if (!installed) return "not set";
+    rmSync(target, { recursive: true, force: true });
     return "removed";
   }
-  const before = existsSync(path) ? readFileSync(path, "utf8") : undefined;
-  if (before === content) return "already set";
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content);
-  return before === undefined ? "added" : "updated";
+  if (installed && sameFiles(filesIn(source), filesIn(target))) return "already set";
+  rmSync(target, { recursive: true, force: true });
+  cpSync(source, target, { recursive: true });
+  return installed ? "updated" : "added";
 }
 
 const jsonObject = z.record(z.string(), z.json());
@@ -62,12 +75,23 @@ export function editServers(text: string, section: string, entry: Entry | undefi
   return { text: `${JSON.stringify({ ...config.data, [section]: next }, null, 2)}\n`, outcome };
 }
 
-type McpTarget = { name: string; found: () => boolean; apply: (remove: boolean) => Outcome };
+type McpTarget = { name: string; location: string; found: () => boolean; present: () => boolean; apply: (remove: boolean) => Outcome };
 
 function fileTarget(name: string, path: string, section: string, entry: Entry): McpTarget {
   return {
     name,
+    location: path,
     found: () => existsSync(dirname(path)),
+    present() {
+      if (!existsSync(path)) return false;
+      try {
+        const config = jsonObject.safeParse(JSON.parse(readFileSync(path, "utf8")));
+        const servers = config.success ? jsonObject.safeParse(config.data[section] ?? {}) : undefined;
+        return servers?.success === true && servers.data[SERVER] !== undefined;
+      } catch {
+        return false;
+      }
+    },
     apply(remove) {
       const before = existsSync(path) ? readFileSync(path, "utf8") : "";
       const change = editServers(before, section, remove ? undefined : entry);
@@ -88,7 +112,9 @@ function claudeTarget(url: string, key: string): McpTarget {
   const run = (args: string[]) => spawnSync("claude", args, { encoding: "utf8" });
   return {
     name: "claude-code",
+    location: join(homedir(), ".claude.json"),
     found: () => onPath("claude"),
+    present: () => onPath("claude") && run(["mcp", "get", SERVER]).status === 0,
     apply(remove) {
       const present = run(["mcp", "get", SERVER]).status === 0;
       if (remove && !present) return "not set";
@@ -101,6 +127,10 @@ function claudeTarget(url: string, key: string): McpTarget {
   };
 }
 
+export function mcpCopies(home = homedir()) {
+  return mcpTargets("", "", home).filter((target) => target.present()).map(({ name, location }) => ({ name, location }));
+}
+
 export function mcpTargets(apiUrl: string, key: string, home = homedir()): McpTarget[] {
   const url = `${apiUrl}/mcp`;
   const headers = { Authorization: `Bearer ${key}` };
@@ -111,26 +141,38 @@ export function mcpTargets(apiUrl: string, key: string, home = homedir()): McpTa
   ];
 }
 
-export function writeEnvKey(path: string, values: Record<string, string>, overwrite: boolean) {
-  const before = existsSync(path) ? readFileSync(path, "utf8") : "";
-  const lines = before.split("\n");
-  const outcomes: Record<string, Outcome> = {};
-  for (const [name, value] of Object.entries(values)) {
-    const index = lines.findIndex((line) => line.replace(/^export\s+/, "").startsWith(`${name}=`));
-    if (index === -1) {
-      if (lines.length > 0 && lines.at(-1) === "") lines.pop();
-      lines.push(`${name}=${value}`, "");
-      outcomes[name] = "added";
-    } else if (lines[index] === `${name}=${value}`) {
-      outcomes[name] = "already set";
-    } else if (overwrite) {
-      lines[index] = `${name}=${value}`;
-      outcomes[name] = "updated";
-    } else {
-      outcomes[name] = "skipped: already in the file, pass --overwrite to replace it";
-    }
-  }
-  const text = lines.join("\n");
-  if (text !== before) writeFileSync(path, text.endsWith("\n") ? text : `${text}\n`, { mode: 0o600 });
-  return outcomes;
+const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
+
+export function installedTargets(output: string) {
+  return [
+    ...new Set(
+      output
+        .replace(ANSI, "")
+        .split("\n")
+        .map((line) => line.match(/→\s+(\S*skills\/[^\s│]+)/)?.[1])
+        .filter((target): target is string => target !== undefined),
+    ),
+  ];
+}
+
+const npmFreeEnv = () =>
+  Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("npm_config_") && !name.startsWith("npm_lifecycle") && name !== "npm_command"));
+
+export function skillsCli(options: { remove: boolean; local: boolean; cwd: string }) {
+  const scope = options.local ? [] : ["-g"];
+  const results = SKILLS.map((skill) => {
+    const args = options.remove
+      ? ["-y", "skills", "remove", skill, "-y", ...scope]
+      : ["-y", "skills", "add", bundledSkill(skill), "-y", "--copy", ...scope];
+    const run = spawnSync("npx", args, {
+      cwd: options.cwd,
+      encoding: "utf8",
+      env: npmFreeEnv(),
+      timeout: 120_000,
+      shell: process.platform === "win32",
+    });
+    const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
+    return { ok: run.status === 0, targets: installedTargets(output) };
+  });
+  return { ok: results.every((result) => result.ok), targets: results.flatMap((result) => result.targets) };
 }

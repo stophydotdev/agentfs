@@ -13,9 +13,10 @@ const file = (path: string) => ({
   created_at: "2026-09-23T00:00:00.000Z",
 });
 
-export function fakeApi(options: { partSize?: number } = {}) {
+export function fakeApi(options: { partSize?: number; failPartOnce?: number; takenPaths?: string[] } = {}) {
   const seen: Seen[] = [];
   const parts = new Map<number, string>();
+  const failed = new Set<number>();
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
@@ -33,6 +34,9 @@ export function fakeApi(options: { partSize?: number } = {}) {
         return Response.json({ code: "unauthorized", detail: "Missing or invalid API key." }, { status: 401 });
       }
       if (url.pathname === "/v1/me") return Response.json({ id: "org_1", authenticated: true, default_project: "default", plan: "Free" });
+      if (url.pathname === "/v1/files" && request.method === "POST" && options.takenPaths?.includes(entry.form?.path ?? "")) {
+        return Response.json({ code: "path_exists", detail: `The path /${entry.form?.path} already exists.` }, { status: 409 });
+      }
       if (url.pathname === "/v1/files" && request.method === "POST") {
         return Response.json(file(entry.form?.path ?? `default/${(entry.form?.file ?? "file:x").slice(5)}`), { status: 201 });
       }
@@ -42,6 +46,10 @@ export function fakeApi(options: { partSize?: number } = {}) {
         return Response.json({ id: "up_1", transport: "worker", part_size: partSize, total_parts: Math.ceil(input.size_bytes / partSize) }, { status: 201 });
       }
       const part = url.pathname.match(/^\/v1\/uploads\/up_1\/parts\/(\d+)$/);
+      if (part && request.method === "PUT" && Number(part[1]) === options.failPartOnce && !failed.has(Number(part[1]))) {
+        failed.add(Number(part[1]));
+        return Response.json({ code: "upload_unavailable" }, { status: 503 });
+      }
       if (part && request.method === "PUT") {
         parts.set(Number(part[1]), entry.body);
         return Response.json({ part_number: Number(part[1]) });

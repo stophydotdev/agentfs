@@ -2,9 +2,20 @@ import { spawn } from "node:child_process";
 
 import { ApiError, type Client, type Device } from "./api";
 
-export function openBrowser(url: string) {
-  const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
-  const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
+export function safeWebUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function openBrowser(value: string) {
+  const url = safeWebUrl(value);
+  if (!url) return false;
+  const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "rundll32" : "xdg-open";
+  const args = process.platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url];
   try {
     const child = spawn(command, args, { stdio: "ignore", detached: true });
     child.on("error", () => undefined);

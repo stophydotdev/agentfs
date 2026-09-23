@@ -1,5 +1,5 @@
 import type { Project, StoredFile } from "./api";
-import { bold, dim, ok } from "./ui";
+import { bold, clean, dim, ok } from "./ui";
 
 export type Output = {
   json: boolean;
@@ -44,8 +44,8 @@ const table = (rows: string[][]) => {
 
 export function fileLine(file: StoredFile) {
   return [
-    ok(`${bold(file.path)} ${dim(`${formatBytes(file.size_bytes)} · ${file.visibility}`)}`),
-    `  ${file.url ?? dim(`Private. Run agentfs share ${file.id} for a link.`)}`,
+    ok(`${bold(clean(file.path))} ${dim(`${formatBytes(file.size_bytes)} · ${clean(file.visibility)}`)}`),
+    `  ${file.url ? clean(file.url) : dim(`Private. Run agentfs share ${clean(file.id)} for a link.`)}`,
   ].join("\n");
 }
 
@@ -53,7 +53,7 @@ export function filesTable(files: StoredFile[]) {
   if (files.length === 0) return dim("No files.");
   return table([
     ["ID", "PATH", "SIZE", "VISIBILITY", "CREATED"],
-    ...files.map((file) => [file.id, file.path, formatBytes(file.size_bytes), file.visibility, file.created_at.slice(0, 10)]),
+    ...files.map((file) => [clean(file.id), clean(file.path), formatBytes(file.size_bytes), clean(file.visibility), clean(file.created_at.slice(0, 10))]),
   ]);
 }
 
@@ -61,6 +61,6 @@ export function projectsTable(projects: Project[]) {
   if (projects.length === 0) return dim("No projects.");
   return table([
     ["NAME", "FILES", "SIZE", "VISIBILITY"],
-    ...projects.map((project) => [project.name, String(project.file_count), formatBytes(project.size_bytes), project.default_visibility]),
+    ...projects.map((project) => [clean(project.name), String(project.file_count), formatBytes(project.size_bytes), clean(project.default_visibility)]),
   ]);
 }

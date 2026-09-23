@@ -1,17 +1,23 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { applySkill, bundledSkill, editServers, writeEnvKey } from "../src/setup";
+import { applySkill, bundledSkill, editServers, SKILLS } from "../src/setup";
 
 const temp = () => mkdtempSync(join(tmpdir(), "agentfs-"));
 
-test("the bundled skill installs once, then reports it is already set, then removes cleanly", () => {
+test("every bundled skill installs, then reports already set, then removes cleanly", () => {
   const root = temp();
-  expect(bundledSkill("agentfs")).toContain("name: agentfs");
+  for (const skill of SKILLS) expect(existsSync(join(bundledSkill(skill), "SKILL.md"))).toBe(true);
+
   expect(applySkill(root, "agentfs", false)).toBe("added");
+  expect(existsSync(join(root, "agentfs", "SKILL.md"))).toBe(true);
   expect(applySkill(root, "agentfs", false)).toBe("already set");
+
+  writeFileSync(join(root, "agentfs", "SKILL.md"), "stale");
+  expect(applySkill(root, "agentfs", false)).toBe("updated");
+
   expect(applySkill(root, "agentfs", true)).toBe("removed");
   expect(applySkill(root, "agentfs", true)).toBe("not set");
 });
@@ -27,17 +33,13 @@ test("adding the MCP server keeps the other servers and settings", () => {
   expect(editServers("not json", "mcpServers", {})).toBeUndefined();
 });
 
-test("env only replaces an existing key when asked", () => {
-  const file = join(temp(), ".env");
-  writeFileSync(file, "OTHER=1\nAGENTFS_KEY=afs_old\n");
+test("control characters from the server are stripped before printing", async () => {
+  const { clean } = await import("../src/ui");
+  expect(clean("report\u001b]52;c;ZXZpbA==\u0007.pdf")).toBe("report]52;c;ZXZpbA==.pdf");
+});
 
-  expect(writeEnvKey(file, { AGENTFS_KEY: "afs_new" }, false).AGENTFS_KEY).toStartWith("skipped");
-  expect(readFileSync(file, "utf8")).toBe("OTHER=1\nAGENTFS_KEY=afs_old\n");
-
-  expect(writeEnvKey(file, { AGENTFS_KEY: "afs_new" }, true).AGENTFS_KEY).toBe("updated");
-  expect(readFileSync(file, "utf8")).toBe("OTHER=1\nAGENTFS_KEY=afs_new\n");
-
-  const fresh = join(temp(), ".env");
-  writeEnvKey(fresh, { AGENTFS_KEY: "afs_new" }, false);
-  expect(readFileSync(fresh, "utf8")).toBe("AGENTFS_KEY=afs_new\n");
+test("the skills installer's output is read into the folders it wrote to", async () => {
+  const { installedTargets } = await import("../src/setup");
+  const output = "\u001b[32m◇  Installed 1 skill\u001b[39m\n│  ✓ agentfs (copied)              │\n│    → ~/.claude/skills/agentfs    │\n│    → ~/.agents/skills/agentfs    │\n│    → ~/.pi/agent/skills/agentfs  │\n";
+  expect(installedTargets(output)).toEqual(["~/.claude/skills/agentfs", "~/.agents/skills/agentfs", "~/.pi/agent/skills/agentfs"]);
 });

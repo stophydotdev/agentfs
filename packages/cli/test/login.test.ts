@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { ApiError, type Client, type Device } from "../src/api";
-import { waitForApproval } from "../src/login";
+import { safeWebUrl, waitForApproval } from "../src/login";
 
 const device: Device = {
   device_code: "dc",
@@ -43,4 +43,10 @@ test("a denied login stops with a clear message", async () => {
   } as unknown as Client;
 
   await expect(waitForApproval(client, device, () => 0, async () => {})).rejects.toThrow("denied in the browser");
+});
+
+test("only web links are opened", () => {
+  expect(safeWebUrl("https://agentfs.cloud/device?code=AB")).toBe("https://agentfs.cloud/device?code=AB");
+  expect(safeWebUrl("file:///etc/passwd")).toBeUndefined();
+  expect(safeWebUrl("javascript:alert(1)")).toBeUndefined();
 });

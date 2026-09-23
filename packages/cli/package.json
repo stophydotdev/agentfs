@@ -1,6 +1,6 @@
 {
-  "name": "agentfs",
-  "version": "0.1.0",
+  "name": "@agentfs/cli",
+  "version": "0.0.1",
   "description": "Cloud storage for AI agents from the terminal. Upload a file, get a link.",
   "license": "MIT",
   "homepage": "https://agentfs.cloud",
@@ -21,7 +21,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20.12"
   },
   "scripts": {
     "dev": "bun src/index.ts",
@@ -40,5 +40,8 @@
     "type": "git",
     "url": "git+https://github.com/stophydotdev/agentfs.git",
     "directory": "packages/cli"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
