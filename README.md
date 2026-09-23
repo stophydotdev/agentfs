@@ -1,14 +1,6 @@
 # AgentFS
 
-AgentFS developer tools for the hosted AgentFS service.
-
-This private repository contains the client-side developer experience:
-
-- TypeScript SDK
-- CLI
-- Agent skills
-- Examples
-- Shared API types
+Developer tools for [AgentFS](https://agentfs.cloud), cloud storage for AI agents.
 
 The hosted AgentFS application lives in [`stophydotdev/agentfs-app`](https://github.com/stophydotdev/agentfs-app).
 
@@ -17,14 +9,34 @@ The hosted AgentFS application lives in [`stophydotdev/agentfs-app`](https://git
 ```text
 agentfs/
 ├── packages/
-│   ├── sdk/       # TypeScript SDK
-│   └── cli/       # AgentFS CLI
+│   └── cli/       # agentfs CLI, published to npm as "agentfs"
 ├── skills/
-│   └── agentfs/   # Agent instructions and onboarding
-├── examples/      # SDK and CLI examples
+│   └── agentfs/   # Agent skill, bundled into the CLI and installed by `agentfs setup`
 └── README.md
 ```
 
+## CLI
+
+```bash
+npm install -g agentfs
+agentfs login
+agentfs upload ./report.pdf
+agentfs setup
+```
+
+See [`packages/cli/README.md`](packages/cli/README.md) for every command.
+
+## Development
+
+```bash
+bun install
+bun run --cwd packages/cli dev -- status
+bun test
+bun run build
+```
+
+`AGENTFS_API_URL=http://localhost:3000` points the CLI at a local `agentfs-app` dev server.
+
 ## Status
 
-The SDK and CLI are not implemented yet. The initial AgentFS onboarding skill is included as the starting point for the developer experience.
+The CLI and the agent skill work against the REST API. A TypeScript SDK is not built yet.
