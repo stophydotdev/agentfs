@@ -1,6 +1,6 @@
 {
   "name": "@agentfs/cli",
-  "version": "0.1.0",
+  "version": "0.0.2",
   "description": "Cloud storage for AI agents from the terminal. Upload a file, get a link.",
   "license": "MIT",
   "homepage": "https://agentfs.cloud",
