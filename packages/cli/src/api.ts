@@ -35,10 +35,13 @@ export const accountSchema = z.object({
 
 export const uploadSessionSchema = z.object({
   id: z.string(),
+  status: z.string().optional(),
   transport: z.enum(["s3", "worker"]),
   part_size: z.number(),
   total_parts: z.number(),
   upload_url: z.string().optional(),
+  uploaded_parts: z.array(z.object({ part_number: z.number() })).optional(),
+  file: fileSchema.optional(),
 });
 
 const partUrlsSchema = z.object({
@@ -84,13 +87,31 @@ export class ApiError extends Error {
   }
 }
 
-async function apiError(response: Response) {
-  const body = problemSchema.safeParse(await response.json().catch(() => null));
-  const code = (body.success && (body.data.code ?? body.data.title)) || `http_${response.status}`;
-  const detail = (body.success && body.data.detail) || response.statusText || "Request failed.";
-  const retryAfter = Number(response.headers.get("retry-after")) || undefined;
-  return new ApiError(response.status, code, detail, retryAfter);
+export function retryAfterSeconds(value: string | null | undefined) {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds);
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? undefined : Math.max(0, (date - Date.now()) / 1000);
 }
+
+export function problemError(status: number, text: string, retryAfter: string | null | undefined, fallback: string) {
+  const json = (() => {
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return null;
+    }
+  })();
+  const body = problemSchema.safeParse(json);
+  const xmlMessage = /<Message>([^<]*)<\/Message>/.exec(text)?.[1];
+  const code = (body.success && (body.data.code ?? body.data.title)) || `http_${status}`;
+  const detail = (body.success && body.data.detail) || xmlMessage || fallback;
+  return new ApiError(status, code, detail, retryAfterSeconds(retryAfter));
+}
+
+const apiError = async (response: Response) =>
+  problemError(response.status, await response.text().catch(() => ""), response.headers.get("retry-after"), response.statusText || "Request failed.");
 
 export type FileFilters = {
   project?: string;
@@ -153,11 +174,13 @@ export function createClient({ apiKey, apiUrl }: { apiKey: string | undefined; a
     uploadForm: (form: FormData, extra: Record<string, string>) =>
       json(fileSchema, "/v1/files", { method: "POST", body: form, headers: extra }),
     createUpload: (input: Record<string, unknown>) => json(uploadSessionSchema, "/v1/uploads", { method: "POST", ...body(input) }),
+    getUpload: (id: string) => json(uploadSessionSchema, `/v1/uploads/${encodeURIComponent(id)}`),
+    partTarget: (id: string, part: number) => ({
+      url: new URL(`/v1/uploads/${encodeURIComponent(id)}/parts/${part}`, apiUrl).href,
+      headers: headers(),
+    }),
     partUrls: (id: string, from: number, to: number) =>
       json(partUrlsSchema, `/v1/uploads/${encodeURIComponent(id)}/part-urls?from=${from}&to=${to}`),
-    putPart: async (id: string, part: number, bytes: Blob) => {
-      await send(`/v1/uploads/${encodeURIComponent(id)}/parts/${part}`, { method: "PUT", body: bytes });
-    },
     completeUpload: async (id: string) => {
       const response = await send(`/v1/uploads/${encodeURIComponent(id)}/complete`, { method: "POST" });
       return response.status === 202 ? undefined : fileSchema.parse(await response.json());

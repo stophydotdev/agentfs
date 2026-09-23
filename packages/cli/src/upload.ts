@@ -1,32 +1,65 @@
-import { openAsBlob, statSync } from "node:fs";
-import { basename } from "node:path";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
+import { mkdirSync, openAsBlob, readFileSync, rmSync, statSync, writeFileSync, type Stats } from "node:fs";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { homedir } from "node:os";
+import { basename, join, resolve } from "node:path";
+import { z } from "zod";
 
-import { ApiError, type Client, type StoredFile } from "./api";
+import { ApiError, problemError, type Client, type StoredFile, type UploadSession } from "./api";
 
-export const ONE_SHOT_LIMIT = 100 * 1024 * 1024;
+const MIB = 1024 * 1024;
+export const ONE_SHOT_LIMIT = 100 * MIB;
 export const KEYLESS_TOO_LARGE = "Log in to upload files over 100 MB: agentfs login";
 const PART_URL_BATCH = 100;
 const COMPLETE_POLLS = 30;
-const PART_ATTEMPTS = 3;
+const HTTP_ATTEMPTS = 8;
+const DROP_ATTEMPTS = 20;
+const BACKOFF_BASE_MS = 500;
+const BACKOFF_CAP_MS = 15_000;
 
-class StorageError extends Error {
-  constructor(readonly status: number) {
-    super(`Storage rejected a part (HTTP ${status}).`);
-  }
-}
-
-const retryable = (error: unknown) => {
-  const status = error instanceof ApiError ? error.status : error instanceof StorageError ? error.status : undefined;
-  return status === undefined || status >= 500 || status === 429 || status === 408;
+export type Transfer = {
+  sessionThreshold: number;
+  keylessLimit: number;
+  concurrency: number;
+  stallMs: number;
+  stateDir: string;
+  sleep: (ms: number) => Promise<void>;
+  random: () => number;
 };
 
-export async function withRetry<T>(task: () => Promise<T>, attempts = PART_ATTEMPTS, wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))) {
-  for (let attempt = 1; ; attempt += 1) {
+export const defaultTransfer = (): Transfer => ({
+  sessionThreshold: 16 * MIB,
+  keylessLimit: ONE_SHOT_LIMIT,
+  concurrency: 6,
+  stallMs: 60_000,
+  stateDir: join(homedir(), ".agentfs", "uploads"),
+  sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+  random: Math.random,
+});
+
+class DroppedError extends Error {}
+class ExpiredUrlError extends Error {}
+
+const retryableStatus = (status: number) => status === 408 || status === 429 || status >= 500;
+
+export async function withRetry<T>(task: () => Promise<T>, { sleep, random }: Pick<Transfer, "sleep" | "random">) {
+  let failed = 0;
+  let dropped = 0;
+  for (;;) {
     try {
       return await task();
     } catch (error) {
-      if (attempt >= attempts || !retryable(error)) throw error;
-      await wait(1000 * 2 ** (attempt - 1));
+      if (error instanceof z.ZodError) throw error;
+      if (error instanceof ApiError && !retryableStatus(error.status)) throw error;
+      const isHttp = error instanceof ApiError || error instanceof ExpiredUrlError;
+      if (isHttp) failed += 1;
+      else dropped += 1;
+      if (failed >= HTTP_ATTEMPTS || dropped >= DROP_ATTEMPTS) throw error;
+      if (error instanceof ExpiredUrlError) continue;
+      const ceiling = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** (failed + dropped - 1));
+      await sleep(error instanceof ApiError && error.retryAfter !== undefined ? error.retryAfter * 1000 : random() * ceiling);
     }
   }
 }
@@ -88,55 +121,221 @@ async function targetPath(client: Client, local: string, options: UploadOptions)
   return options.path ? joinPath(project, options.path) : joinPath(project, options.prefix, basename(local));
 }
 
-async function putBytes(url: string, bytes: Blob) {
-  const response = await fetch(url, { method: "PUT", body: bytes });
-  await response.body?.cancel();
-  if (!response.ok) throw new StorageError(response.status);
+type Target = { url: string; headers: Record<string, string> };
+type PutResult = { status: number; body: string; retryAfter: string | undefined };
+
+function put(target: Target, bytes: Blob, stallMs: number, onSent: (bytes: number) => void) {
+  return new Promise<PutResult>((done, reject) => {
+    const url = new URL(target.url);
+    const send = url.protocol === "https:" ? httpsRequest : httpRequest;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const request = send(url, { method: "PUT", headers: { ...target.headers, "content-length": String(bytes.size) } }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => {
+        chunks.push(chunk);
+        arm();
+      });
+      response.on("error", fail);
+      response.on("end", () => {
+        clearTimeout(timer);
+        const retryAfter = response.headers["retry-after"];
+        done({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString(), retryAfter });
+      });
+    });
+    function fail(error: Error) {
+      clearTimeout(timer);
+      reject(new DroppedError(`The connection dropped: ${error.message}`));
+    }
+    function arm() {
+      clearTimeout(timer);
+      timer = setTimeout(() => request.destroy(new Error(`no upload progress for ${stallMs / 1000}s`)), stallMs);
+    }
+    request.on("error", fail);
+    arm();
+    void (async () => {
+      for await (const chunk of bytes.stream()) {
+        if (request.destroyed) return;
+        const more = request.write(chunk, (error) => {
+          if (error) return;
+          onSent(chunk.byteLength);
+          arm();
+        });
+        if (!more) await once(request, "drain");
+      }
+      request.end();
+    })().catch((error: Error) => request.destroy(error));
+  });
 }
 
-async function uploadSession(client: Client, local: string, size: number, options: UploadOptions, onProgress?: (done: number) => void) {
+function progressOf(onProgress: ((done: number) => void) | undefined, resumed: number) {
+  let done = resumed;
+  const sending = new Map<number, number>();
+  const report = () => onProgress?.(done + [...sending.values()].reduce((sum, bytes) => sum + bytes, 0));
+  return {
+    sent(part: number, bytes: number) {
+      sending.set(part, (sending.get(part) ?? 0) + bytes);
+      report();
+    },
+    reset(part: number) {
+      sending.delete(part);
+      report();
+    },
+    finish(part: number, bytes: number) {
+      sending.delete(part);
+      done += bytes;
+      report();
+    },
+  };
+}
+
+type Route = { targetFor: (part: number) => Promise<Target>; expire?: (part: number) => void };
+
+function routeOf(client: Client, session: UploadSession, transfer: Transfer): Route {
+  const retry = <T>(task: () => Promise<T>) => withRetry(task, transfer);
+  if (session.upload_url) {
+    let url = Promise.resolve(session.upload_url);
+    return {
+      targetFor: async () => ({ url: await url, headers: {} }),
+      expire: () => {
+        url = retry(() => client.getUpload(session.id)).then((fresh) => {
+          if (!fresh.upload_url) throw new Error(`Upload ${session.id} has no upload URL.`);
+          return fresh.upload_url;
+        });
+      },
+    };
+  }
+  if (session.transport === "worker") return { targetFor: async (part) => client.partTarget(session.id, part) };
+  const batches = new Map<number, Promise<Map<number, string>>>();
+  const batchOf = (part: number) => Math.floor((part - 1) / PART_URL_BATCH);
+  const fetchBatch = (index: number) => {
+    const from = index * PART_URL_BATCH + 1;
+    const batch = retry(() => client.partUrls(session.id, from, Math.min(from + PART_URL_BATCH - 1, session.total_parts))).then(
+      ({ parts }) => new Map(parts.map((part) => [part.part_number, part.url])),
+    );
+    batches.set(index, batch);
+    batch.catch(() => batches.delete(index));
+    return batch;
+  };
+  const used = new Map<number, Promise<Map<number, string>>>();
+  return {
+    targetFor: async (part) => {
+      const batch = batches.get(batchOf(part)) ?? fetchBatch(batchOf(part));
+      used.set(part, batch);
+      const url = (await batch).get(part);
+      if (!url) throw new Error(`The server sent no URL for part ${part}.`);
+      return { url, headers: {} };
+    },
+    expire: (part) => {
+      if (batches.get(batchOf(part)) === used.get(part)) batches.delete(batchOf(part));
+    },
+  };
+}
+
+async function sendParts(session: UploadSession, blob: Blob, route: Route, transfer: Transfer, onProgress?: (done: number) => void) {
+  const size = blob.size;
+  const sizeOf = (part: number) => Math.min(part * session.part_size, size) - (part - 1) * session.part_size;
+  const uploaded = new Set((session.uploaded_parts ?? []).map((part) => part.part_number));
+  const pending = Array.from({ length: session.total_parts }, (_, index) => index + 1).filter((part) => !uploaded.has(part));
+  const progress = progressOf(onProgress, [...uploaded].reduce((sum, part) => sum + sizeOf(part), 0));
+
+  const sendPart = async (part: number) => {
+    progress.reset(part);
+    const target = await route.targetFor(part);
+    const bytes = blob.slice((part - 1) * session.part_size, (part - 1) * session.part_size + sizeOf(part));
+    const result = await put(target, bytes, transfer.stallMs, (sent) => progress.sent(part, sent)).catch((error: unknown) => {
+      progress.reset(part);
+      throw error;
+    });
+    if (result.status >= 200 && result.status < 300) return progress.finish(part, sizeOf(part));
+    progress.reset(part);
+    if (route.expire && (result.status === 401 || result.status === 403)) {
+      route.expire(part);
+      throw new ExpiredUrlError(`Storage rejected part ${part} (HTTP ${result.status}).`);
+    }
+    throw problemError(result.status, result.body, result.retryAfter, `Storage rejected part ${part} (HTTP ${result.status}).`);
+  };
+
+  let next = 0;
+  let failure: { error: unknown } | undefined;
+  const worker = async () => {
+    for (let part = pending[next++]; part !== undefined && !failure; part = pending[next++]) {
+      await withRetry(() => sendPart(part), transfer).catch((error: unknown) => {
+        failure ??= { error };
+      });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(transfer.concurrency, pending.length) }, worker));
+  if (failure) throw failure.error;
+}
+
+const stateSchema = z.object({ uploadId: z.string(), path: z.string(), size: z.number(), mtimeMs: z.number(), target: z.string() });
+
+function resumeState(dir: string, local: string, stats: Stats, target: string) {
+  const path = resolve(local);
+  const key = createHash("sha256").update(`${path}\n${stats.size}\n${stats.mtimeMs}`).digest("hex");
+  const file = join(dir, `${key}.json`);
+  return {
+    read() {
+      try {
+        const parsed = stateSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
+        return parsed.success && parsed.data.target === target ? parsed.data.uploadId : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    save(uploadId: string) {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      writeFileSync(file, `${JSON.stringify({ uploadId, path, size: stats.size, mtimeMs: stats.mtimeMs, target })}\n`, { mode: 0o600 });
+    },
+    clear() {
+      rmSync(file, { force: true });
+    },
+  };
+}
+
+async function uploadSession(client: Client, local: string, stats: Stats, options: UploadOptions, transfer: Transfer, onProgress?: (done: number) => void) {
+  const retry = <T>(task: () => Promise<T>) => withRetry(task, transfer);
   const blob = await openAsBlob(local);
-  const session = await client.createUpload({
-    path: await targetPath(client, local, options),
-    size_bytes: size,
-    visibility: options.visibility,
-    expires_in: options.expiresIn,
-    label: options.label,
-  });
-  const slice = (part: number) => blob.slice((part - 1) * session.part_size, Math.min(part * session.part_size, size));
+  const path = await targetPath(client, local, options);
+  const state = resumeState(transfer.stateDir, local, stats, path);
+  const saved = state.read();
+  const resumed = saved ? await retry(() => client.getUpload(saved)).catch(() => undefined) : undefined;
+  if (resumed?.status === "completed" && resumed.file) {
+    state.clear();
+    return resumed.file;
+  }
+  const session =
+    resumed && (resumed.status === "active" || resumed.status === "completing")
+      ? resumed
+      : await retry(() =>
+          client.createUpload({
+            path,
+            size_bytes: stats.size,
+            multipart: true,
+            visibility: options.visibility,
+            expires_in: options.expiresIn,
+            label: options.label,
+          }),
+        );
+  state.save(session.id);
   try {
-    await transfer();
+    if (session.status !== "completing") await sendParts(session, blob, routeOf(client, session, transfer), transfer, onProgress);
   } catch (error) {
-    await client.abortUpload(session.id);
+    if (error instanceof ApiError && !retryableStatus(error.status)) {
+      await client.abortUpload(session.id);
+      state.clear();
+    }
     throw error;
   }
   for (let attempt = 0; attempt < COMPLETE_POLLS; attempt += 1) {
-    const done = await client.completeUpload(session.id);
-    if (done) return done;
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const done = await retry(() => client.completeUpload(session.id));
+    if (done) {
+      state.clear();
+      return done;
+    }
+    await transfer.sleep(1000);
   }
   throw new Error(`Upload ${session.id} is still finishing. Check it later with agentfs ls.`);
-
-  async function transfer() {
-    if (session.transport === "s3" && session.upload_url) {
-      const url = session.upload_url;
-      await withRetry(() => putBytes(url, blob));
-      onProgress?.(size);
-    } else if (session.transport === "s3") {
-      for (let from = 1; from <= session.total_parts; from += PART_URL_BATCH) {
-        const { parts } = await client.partUrls(session.id, from, Math.min(from + PART_URL_BATCH - 1, session.total_parts));
-        for (const part of parts) {
-          await withRetry(() => putBytes(part.url, slice(part.part_number)));
-          onProgress?.(Math.min(part.part_number * session.part_size, size));
-        }
-      }
-    } else {
-      for (let part = 1; part <= session.total_parts; part += 1) {
-        await withRetry(() => client.putPart(session.id, part, slice(part)));
-        onProgress?.(Math.min(part * session.part_size, size));
-      }
-    }
-  }
 }
 
 export async function uploadFile(
@@ -144,14 +343,15 @@ export async function uploadFile(
   local: string,
   options: UploadOptions,
   onProgress?: (done: number) => void,
-  oneShotLimit = ONE_SHOT_LIMIT,
+  overrides: Partial<Transfer> = {},
 ): Promise<StoredFile> {
+  const transfer = { ...defaultTransfer(), ...overrides };
   const stats = statSync(local);
   if (!stats.isFile()) throw new Error(`${local} is not a file.`);
   if (!client.hasKey) {
-    if (stats.size > oneShotLimit) throw new Error(KEYLESS_TOO_LARGE);
+    if (stats.size > transfer.keylessLimit) throw new Error(KEYLESS_TOO_LARGE);
     return uploadKeyless(client, local);
   }
-  if (stats.size <= oneShotLimit) return uploadOneShot(client, local, options);
-  return uploadSession(client, local, stats.size, options, onProgress);
+  if (stats.size <= transfer.sessionThreshold) return uploadOneShot(client, local, options);
+  return uploadSession(client, local, stats, options, transfer, onProgress);
 }
