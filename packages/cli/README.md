@@ -47,7 +47,7 @@ On a terminal the output is short and readable. When piped, or with `--json`, ev
 
 ## Configuration
 
-The key is read from `--api-key`, then `AGENTFS_KEY`, then `~/.config/agentfs/config.json` (written by `agentfs login`, readable only by you). `--api-url` or `AGENTFS_API_URL` points the CLI at another API origin.
+The key is read from `--api-key`, then `AGENTFS_KEY`, then `~/.config/agentfs/config.json` (written by `agentfs login`, readable only by you). Set `NO_COLOR=1` to turn colors off.
 
 ## Development
 
@@ -57,3 +57,5 @@ bun run dev -- status
 bun test
 bun run build
 ```
+
+`AGENTFS_API_URL=http://localhost:3000` points the CLI at a local `agentfs-app` dev server.

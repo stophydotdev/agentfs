@@ -42,9 +42,9 @@ export function clearConfig() {
   return stored.apiKey !== undefined;
 }
 
-export function resolveCredentials(flags: { apiKey?: string; apiUrl?: string }): Credentials {
+export function resolveCredentials(flags: { apiKey?: string }): Credentials {
   const stored = readConfig();
-  const apiUrl = (flags.apiUrl || process.env.AGENTFS_API_URL || stored.apiUrl || DEFAULT_API_URL).replace(/\/+$/, "");
+  const apiUrl = (process.env.AGENTFS_API_URL || stored.apiUrl || DEFAULT_API_URL).replace(/\/+$/, "");
   if (flags.apiKey) return { apiKey: flags.apiKey, apiUrl, source: "flag" };
   if (process.env.AGENTFS_KEY) return { apiKey: process.env.AGENTFS_KEY, apiUrl, source: "env" };
   if (stored.apiKey) return { apiKey: stored.apiKey, apiUrl, source: "config" };

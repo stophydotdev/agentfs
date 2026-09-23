@@ -1,4 +1,5 @@
 import type { Project, StoredFile } from "./api";
+import { bold, dim, ok } from "./ui";
 
 export type Output = {
   json: boolean;
@@ -33,15 +34,23 @@ export function formatBytes(bytes: number) {
 
 const table = (rows: string[][]) => {
   const widths = rows[0]?.map((_, column) => Math.max(...rows.map((row) => (row[column] ?? "").length))) ?? [];
-  return rows.map((row) => row.map((cell, column) => cell.padEnd(widths[column] ?? 0)).join("  ").trimEnd()).join("\n");
+  return rows
+    .map((row, index) => {
+      const line = row.map((cell, column) => cell.padEnd(widths[column] ?? 0)).join("  ").trimEnd();
+      return index === 0 ? dim(line) : line;
+    })
+    .join("\n");
 };
 
 export function fileLine(file: StoredFile) {
-  return [`${file.path}  ${formatBytes(file.size_bytes)}  ${file.visibility}`, file.url ?? "private: run agentfs share " + file.id].join("\n");
+  return [
+    ok(`${bold(file.path)} ${dim(`${formatBytes(file.size_bytes)} · ${file.visibility}`)}`),
+    `  ${file.url ?? dim(`Private. Run agentfs share ${file.id} for a link.`)}`,
+  ].join("\n");
 }
 
 export function filesTable(files: StoredFile[]) {
-  if (files.length === 0) return "No files.";
+  if (files.length === 0) return dim("No files.");
   return table([
     ["ID", "PATH", "SIZE", "VISIBILITY", "CREATED"],
     ...files.map((file) => [file.id, file.path, formatBytes(file.size_bytes), file.visibility, file.created_at.slice(0, 10)]),
@@ -49,7 +58,7 @@ export function filesTable(files: StoredFile[]) {
 }
 
 export function projectsTable(projects: Project[]) {
-  if (projects.length === 0) return "No projects.";
+  if (projects.length === 0) return dim("No projects.");
   return table([
     ["NAME", "FILES", "SIZE", "VISIBILITY"],
     ...projects.map((project) => [project.name, String(project.file_count), formatBytes(project.size_bytes), project.default_visibility]),
