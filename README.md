@@ -1,5 +1,7 @@
 # AgentFS
 
+[![skills.sh](https://skills.sh/b/stophydotdev/agentfs)](https://skills.sh/stophydotdev/agentfs)
+
 Developer tools for [AgentFS](https://agentfs.cloud), cloud storage for AI agents.
 
 ```text

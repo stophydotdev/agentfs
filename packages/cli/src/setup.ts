@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 export const SKILLS = ["agentfs"] as const;
+export const SKILLS_REPO = "stophydotdev/agentfs";
 const SERVER = "agentfs";
 
 export type Outcome = "added" | "updated" | "already set" | "removed" | "not set" | `skipped: ${string}` | `failed: ${string}`;
@@ -160,19 +161,20 @@ const npmFreeEnv = () =>
 
 export function skillsCli(options: { remove: boolean; local: boolean; cwd: string }) {
   const scope = options.local ? [] : ["-g"];
-  const results = SKILLS.map((skill) => {
-    const args = options.remove
-      ? ["-y", "skills", "remove", skill, "-y", ...scope]
-      : ["-y", "skills", "add", bundledSkill(skill), "-y", "--copy", ...scope];
-    const run = spawnSync("npx", args, {
+  const run = (args: string[]) => {
+    const result = spawnSync("npx", ["-y", "skills", ...args, "-y", ...scope], {
       cwd: options.cwd,
       encoding: "utf8",
       env: npmFreeEnv(),
       timeout: 120_000,
       shell: process.platform === "win32",
     });
-    const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
-    return { ok: run.status === 0, targets: installedTargets(output) };
+    return { ok: result.status === 0, targets: installedTargets(`${result.stdout ?? ""}${result.stderr ?? ""}`) };
+  };
+  const results = SKILLS.map((skill) => {
+    if (options.remove) return run(["remove", skill]);
+    const fromRepo = run(["add", SKILLS_REPO, "--skill", skill, "--copy"]);
+    return fromRepo.ok && fromRepo.targets.length > 0 ? fromRepo : run(["add", bundledSkill(skill), "--copy"]);
   });
   return { ok: results.every((result) => result.ok), targets: results.flatMap((result) => result.targets) };
 }

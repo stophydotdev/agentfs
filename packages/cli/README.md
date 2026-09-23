@@ -10,6 +10,12 @@ npx -y @agentfs/cli@latest init --all --browser
 
 This installs the CLI, logs you in, and teaches your AI agents to use AgentFS.
 
+Only want the agent skill?
+
+```bash
+npx skills add stophydotdev/agentfs
+```
+
 ## Use it
 
 ```bash
