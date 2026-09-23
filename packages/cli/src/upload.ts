@@ -4,6 +4,7 @@ import { basename } from "node:path";
 import { ApiError, type Client, type StoredFile } from "./api";
 
 export const ONE_SHOT_LIMIT = 100 * 1024 * 1024;
+export const KEYLESS_TOO_LARGE = "Log in to upload files over 100 MB: agentfs login";
 const PART_URL_BATCH = 100;
 const COMPLETE_POLLS = 30;
 const PART_ATTEMPTS = 3;
@@ -76,6 +77,12 @@ async function uploadOneShot(client: Client, local: string, options: UploadOptio
   return client.uploadForm(form, runHeaders(options));
 }
 
+async function uploadKeyless(client: Client, local: string) {
+  const form = new FormData();
+  form.append("file", await openAsBlob(local), basename(local));
+  return client.uploadForm(form, {});
+}
+
 async function targetPath(client: Client, local: string, options: UploadOptions) {
   const project = await projectOf(client, options.project);
   return options.path ? joinPath(project, options.path) : joinPath(project, options.prefix, basename(local));
@@ -141,6 +148,10 @@ export async function uploadFile(
 ): Promise<StoredFile> {
   const stats = statSync(local);
   if (!stats.isFile()) throw new Error(`${local} is not a file.`);
+  if (!client.hasKey) {
+    if (stats.size > oneShotLimit) throw new Error(KEYLESS_TOO_LARGE);
+    return uploadKeyless(client, local);
+  }
   if (stats.size <= oneShotLimit) return uploadOneShot(client, local, options);
   return uploadSession(client, local, stats.size, options, onProgress);
 }

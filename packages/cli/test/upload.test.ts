@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ApiError, createClient } from "../src/api";
-import { uploadFile, withRetry } from "../src/upload";
+import { KEYLESS_TOO_LARGE, uploadFile, withRetry } from "../src/upload";
 import { fakeApi } from "./fake-api";
 
 let stop = () => {};
@@ -82,4 +82,26 @@ test("client errors are not retried", async () => {
   };
   await expect(withRetry(task, 3, async () => {})).rejects.toThrow("no");
   expect(calls).toBe(1);
+});
+
+test("without a key, a small file goes up alone with no path and no auth header", async () => {
+  const api = fakeApi();
+  stop = api.stop;
+  const client = createClient({ apiKey: undefined, apiUrl: api.url });
+
+  const file = await uploadFile(client, localFile("report.pdf", "hello"), { runId: "run_7" });
+
+  expect(api.seen.map((entry) => `${entry.method} ${entry.path}`)).toEqual(["POST /v1/files"]);
+  expect(api.seen[0]?.form).toEqual({ file: "file:report.pdf" });
+  expect(api.seen[0]?.headers.has("authorization")).toBe(false);
+  expect(file.expires_at).toBe("2026-09-24T00:00:00.000Z");
+});
+
+test("without a key, a file over the one-shot limit asks for a login and sends nothing", async () => {
+  const api = fakeApi();
+  stop = api.stop;
+  const client = createClient({ apiKey: undefined, apiUrl: api.url });
+
+  await expect(uploadFile(client, localFile("big.bin", "0123456789"), {}, undefined, 4)).rejects.toThrow(KEYLESS_TOO_LARGE);
+  expect(api.seen).toEqual([]);
 });

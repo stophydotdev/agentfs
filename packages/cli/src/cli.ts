@@ -43,6 +43,8 @@ type Command = {
 
 class UsageError extends Error {}
 
+const KEYED_UPLOAD_FLAGS = ["project", "path", "prefix", "visibility", "expires-in", "label", "replace"] as const;
+
 const errorInfo = (error: unknown) => ({
   code: error instanceof ApiError ? error.code : error instanceof UsageError ? "usage" : "error",
   message: error instanceof Error ? error.message : String(error),
@@ -351,7 +353,6 @@ const COMMANDS: Record<string, Command> = {
   upload: {
     summary: "Upload files and print their links",
     usage: "agentfs upload <file...> [--project p] [--path p/name.ext | --prefix dir] [--visibility public|unlisted|private] [--expires-in 7d] [--label text] [--replace] [--run-id id] [--agent-id name]",
-    auth: true,
     options: {
       project: { type: "string", short: "p" },
       path: { type: "string" },
@@ -368,9 +369,11 @@ const COMMANDS: Record<string, Command> = {
       if (args.length > 1 && text(flags, "path")) throw new UsageError("--path names one file. Use --prefix for several.");
       const missing = args.filter((file) => !existsSync(file));
       if (missing.length > 0) throw new UsageError(`No such file: ${missing.join(", ")}`);
+      const needsLogin = KEYED_UPLOAD_FLAGS.find((name) => flags[name] !== undefined && !(name === "visibility" && flags[name] === "unlisted"));
+      if (!client.hasKey && needsLogin) throw new UsageError(`Log in to use --${needsLogin}: agentfs login`);
       const results: StoredFile[] = [];
       const failed: { file: string; error: ReturnType<typeof errorInfo> }[] = [];
-      const project = await projectOf(client, text(flags, "project"));
+      const project = client.hasKey ? await projectOf(client, text(flags, "project")) : undefined;
       for (const local of args) {
         const name = basename(local);
         const progress = spinner(`Uploading ${name}`);
@@ -400,13 +403,13 @@ const COMMANDS: Record<string, Command> = {
           failed.push({ file: local, error: errorInfo(error) });
         }
       }
-      if (args.length === 1) {
-        out.data(results[0], () => results.map(fileLine).join("\n\n"));
-        return;
+      if (args.length === 1) out.data(results[0], () => results.map(fileLine).join("\n\n"));
+      else {
+        out.data({ success: failed.length === 0, files: results, failed }, () =>
+          [...results.map(fileLine), ...failed.map((item) => fail(`${clean(item.file)} ${dim(`${clean(item.error.message)} (${clean(item.error.code)})`)}`))].join("\n\n"),
+        );
       }
-      out.data({ success: failed.length === 0, files: results, failed }, () =>
-        [...results.map(fileLine), ...failed.map((item) => fail(`${clean(item.file)} ${dim(`${clean(item.error.message)} (${clean(item.error.code)})`)}`))].join("\n\n"),
-      );
+      if (!client.hasKey && results.length > 0) say(dim("Not logged in: links expire in 24 hours. Run agentfs login to keep files."));
       return failed.length > 0 ? 1 : 0;
     },
   },

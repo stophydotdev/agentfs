@@ -11,7 +11,7 @@ allowed-tools:
 Cloud storage for agents. Upload a file, get a link.
 Run `agentfs <command> --help` for flags.
 
-1. Run `agentfs status`. If it isn't authenticated, run `agentfs login` and show the user the link and code. Never ask for a key.
+1. Run `agentfs status`. If it isn't authenticated, run `agentfs login` and show the user the link and code. Never ask for a key. For a quick one-off share, `agentfs upload <file>` also works before login: up to 100 MB, unlisted, and the link expires in 24 hours. Prefer logging in so files last.
 2. Upload with `agentfs upload <file...>`. Group files with `--prefix <dir>`. Pick an exact path with `--path <dir/name>`.
 3. Make anything sensitive `--visibility private`, then share it with `agentfs share <id> --expires-in 1h`.
 4. List uploads with `agentfs ls`, newest first. Tag a task's files with `--run-id <id>` and find them with `agentfs ls --run-id <id>`.

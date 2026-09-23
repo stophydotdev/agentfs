@@ -38,6 +38,32 @@ test("commands that need a key fail with a JSON error an agent can read", async 
   expect(JSON.parse(output.join(""))).toEqual({ success: false, error: { code: "usage", message: "Not logged in. Run agentfs login, or set AGENTFS_KEY." } });
 });
 
+test("upload works before login and says the link expires", async () => {
+  const api = fakeApi();
+  process.env.AGENTFS_API_URL = api.url;
+  const stderr: string[] = [];
+  spyOn(process.stderr, "write").mockImplementation((chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  });
+  const local = join(mkdtempSync(join(tmpdir(), "agentfs-")), "report.pdf");
+  writeFileSync(local, "hello");
+
+  const code = await main(["upload", local, "--json"]);
+  api.stop();
+
+  expect(code).toBe(0);
+  expect(JSON.parse(output.join(""))).toMatchObject({ path: "/guest/report.pdf", expires_at: "2026-09-24T00:00:00.000Z" });
+  expect(stderr.join("")).toContain("links expire in 24 hours. Run agentfs login to keep files.");
+});
+
+test("upload options that need an account ask for a login before login", async () => {
+  const local = join(mkdtempSync(join(tmpdir(), "agentfs-")), "report.pdf");
+  writeFileSync(local, "hello");
+  expect(await main(["upload", local, "--path", "docs/report.pdf", "--json"])).toBe(1);
+  expect(JSON.parse(output.join(""))).toEqual({ success: false, error: { code: "usage", message: "Log in to use --path: agentfs login" } });
+});
+
 test("credentials are written to a file only you can read, even over a loose one", () => {
   writeConfig({ apiKey: "afs_one" });
   chmodSync(credentialsPath(), 0o644);

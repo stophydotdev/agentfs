@@ -30,6 +30,9 @@ export function fakeApi(options: { partSize?: number; failPartOnce?: number; tak
         entry.body = await request.text();
       }
       seen.push(entry);
+      if (!request.headers.has("authorization") && url.pathname === "/v1/files" && request.method === "POST") {
+        return Response.json({ ...file(`guest/${(entry.form?.file ?? "file:x").slice(5)}`), expires_at: "2026-09-24T00:00:00.000Z" }, { status: 201 });
+      }
       if (request.headers.get("authorization") !== "Bearer afs_test") {
         return Response.json({ code: "unauthorized", detail: "Missing or invalid API key." }, { status: 401 });
       }
