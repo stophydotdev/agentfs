@@ -59,3 +59,24 @@ test("paths are checked like Upstash and sent exactly as given", async () => {
   await bucket.exists("/lead//b.txt/");
   expect(urls.at(-1)).toBe("/v1/files/site//lead//b.txt/");
 });
+
+test("retries follow Upstash: 3 attempts for idempotent verbs, full jitter from 200ms, Retry-After capped at 10s, never a POST", async () => {
+  const calls: string[] = [];
+  const waits: number[] = [];
+  const fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    calls.push(`${request.method} ${new URL(request.url).pathname}`);
+    return new Response(JSON.stringify({ code: "busy", title: "busy", status: 503, detail: "busy" }), {
+      status: 503,
+      headers: { "content-type": "application/problem+json", ...(calls.length === 1 ? { "retry-after": "60" } : {}) },
+    });
+  }, { preconnect: () => undefined });
+  const bucket = new Bucket({ token: "afs_key", bucket: "site", fetch, retry: { sleep: async (ms) => void waits.push(ms), random: () => 0.999999 } });
+  await expect(bucket.info("a.txt")).rejects.toMatchObject({ code: "not_ready" });
+  expect(calls).toHaveLength(3);
+  expect(waits).toEqual([10_000, 799]);
+
+  calls.length = 0;
+  await expect(bucket.move("a.txt", "b.txt")).rejects.toMatchObject({ status: 503 });
+  expect(calls).toEqual(["POST /v1/files/site/a.txt/move"]);
+});

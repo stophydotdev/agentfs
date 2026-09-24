@@ -36,7 +36,9 @@ export interface SessionOptions {
   readonly ifMatch?: string;
 }
 
-type Init = RequestInit & { readonly headers?: Record<string, string> };
+type Init = RequestInit & { readonly headers?: Record<string, string>; readonly idempotent?: boolean };
+
+const RETRIED_METHODS = new Set(["GET", "HEAD", "PUT", "DELETE"]);
 type Bytes = Blob | Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array>;
 
 export const encodePath = (path: string): string => path.split("/").map(encodeURIComponent).join("/");
@@ -95,10 +97,15 @@ export const createClient = (options: ClientOptions) => {
   const policy: RetryPolicy = { ...defaultRetryPolicy, ...options.retry };
   const concurrency = Math.max(1, options.concurrency ?? 6);
 
-  const send = async (path: string, init: Init = {}): Promise<Response> => {
-    const response = await fetchImpl(`${baseUrl}${path}`, { ...init, headers: { authorization: `Bearer ${options.token}`, ...init.headers } });
-    if (!response.ok) throw await errorFromResponse(response, `${init.method ?? "GET"} ${path} failed with ${response.status}.`);
-    return response;
+  const send = async (path: string, { idempotent, ...init }: Init = {}): Promise<Response> => {
+    const method = init.method ?? "GET";
+    const attempt = async () => {
+      const response = await fetchImpl(`${baseUrl}${path}`, { ...init, headers: { authorization: `Bearer ${options.token}`, ...init.headers } });
+      if (!response.ok) throw await errorFromResponse(response, `${method} ${path} failed with ${response.status}.`);
+      return response;
+    };
+    const retried = !(init.body instanceof ReadableStream) && (idempotent ?? RETRIED_METHODS.has(method.toUpperCase()));
+    return retried ? withRetry(attempt, policy, init.signal) : attempt();
   };
 
   const json = async <Schema extends z.ZodType>(schema: Schema, path: string, init?: Init): Promise<z.infer<Schema>> =>
@@ -123,11 +130,7 @@ export const createClient = (options: ClientOptions) => {
     const headers: Record<string, string> = { "content-type": write.contentType, "content-length": String(source.size) };
     if (write.ifNoneMatch) headers["if-none-match"] = "*";
     if (write.ifMatch !== undefined) headers["if-match"] = write.ifMatch;
-    const stored = await retryUnlessStream(
-      source,
-      () => json(fileSchema, `/v1/files/${encodePath(path)}?${query}`, { method: "PUT", ...bodyInit(bytesOf(source)), headers, ...(write.signal ? { signal: write.signal } : {}) }),
-      write.signal,
-    );
+    const stored = await json(fileSchema, `/v1/files/${encodePath(path)}?${query}`, { method: "PUT", ...bodyInit(bytesOf(source)), headers, ...(write.signal ? { signal: write.signal } : {}) });
     write.onProgress?.(source.size, source.size);
     return stored;
   };
@@ -155,7 +158,7 @@ export const createClient = (options: ClientOptions) => {
       if (!batch) {
         const from = index * PART_URL_BATCH + 1;
         const to = Math.min(from + PART_URL_BATCH - 1, session.total_parts);
-        batch = withRetry(() => json(partUrlsSchema, `/v1/uploads/${session.id}/part-urls?from=${from}&to=${to}`), policy, write.signal)
+        batch = json(partUrlsSchema, `/v1/uploads/${session.id}/part-urls?from=${from}&to=${to}`, write.signal ? { signal: write.signal } : {})
           .then(({ parts }) => new Map(parts.map((entry) => [entry.part_number, entry.url])));
         batches.set(index, batch);
         batch.catch(() => batches.delete(index));

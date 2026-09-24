@@ -514,13 +514,16 @@ export class Bucket {
   }
 
   async copy(from: string, to: string, options: CopyOptions = {}): Promise<BlobObject> {
-    const copied = await this.#client.json(fileSchema, `/v1/files/${await this.#wire(from)}/copy`, this.#client.jsonInit("POST", {
-      to: await this.#wire(to),
-      if_exists: "replace",
-      content_type: options.contentType,
-      cache: options.cache === undefined ? undefined : wireCache(options.cache),
-      metadata: checkMetadata(options.metadata),
-    }));
+    const copied = await this.#client.json(fileSchema, `/v1/files/${await this.#wire(from)}/copy`, {
+      ...this.#client.jsonInit("POST", {
+        to: await this.#wire(to),
+        if_exists: "replace",
+        content_type: options.contentType,
+        cache: options.cache === undefined ? undefined : wireCache(options.cache),
+        metadata: checkMetadata(options.metadata),
+      }),
+      idempotent: true,
+    });
     return this.#object(copied);
   }
 
@@ -644,11 +647,14 @@ export class Bucket {
   }
 
   async signedReadUrl(path: string, options: SignedReadUrlOptions = {}): Promise<SignedReadUrl> {
-    const signed = await this.#client.json(signedUrlSchema, `/v1/files/${await this.#wire(path)}/signed-url`, this.#client.jsonInit("POST", {
-      expires_in: wireDuration(options.expiresIn ?? "5m", "expiresIn", 1),
-      download_as: options.downloadAs,
-      content_type: options.contentType,
-    }));
+    const signed = await this.#client.json(signedUrlSchema, `/v1/files/${await this.#wire(path)}/signed-url`, {
+      ...this.#client.jsonInit("POST", {
+        expires_in: wireDuration(options.expiresIn ?? "5m", "expiresIn", 1),
+        download_as: options.downloadAs,
+        content_type: options.contentType,
+      }),
+      idempotent: true,
+    });
     return { url: signed.url, expiresAt: signed.expires_at ? new Date(signed.expires_at) : FAR_FUTURE };
   }
 
