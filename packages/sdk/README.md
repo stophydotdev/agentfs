@@ -7,13 +7,11 @@ npm install @agentfs/sdk
 ```
 
 ```ts
-import { Bucket } from "@agentfs/sdk";
+import { Bucket, uniquePath } from "@agentfs/sdk";
 
 const bucket = Bucket.fromEnv(); // AGENTFS_TOKEN, and AGENTFS_BUCKET or the key's default project
 
-const blob = await bucket.put(uniquePath`avatars/${file.name}`, file);
-
-const blob = await bucket.put("avatars/me.png", file, { contentType: "image/png" });
+const blob = await bucket.put(uniquePath`avatars/${file.name}`, file, { contentType: "image/png" });
 blob.url;          // served at its path
 blob.versionedUrl; // url + ?v=<etag>, changes when the bytes do
 
@@ -56,7 +54,7 @@ await bucket.del({ prefix: "tmp/" });
 ```ts
 await bucket.publicUrl("avatars/me.png");
 const { url, expiresAt } = await bucket.signedReadUrl("reports/q3.pdf", { expiresIn: "2m", downloadAs: "Report Q3.pdf" });
-const upload = await bucket.signedUploadUrl("inbox/scan.pdf", { size: file.size, contentType: "application/pdf" });
+const upload = await bucket.signedUploadUrl("inbox/scan.pdf", { contentType: "application/pdf" });
 await fetch(upload.url, { method: "PUT", headers: upload.headers, body: file });
 ```
 
@@ -118,7 +116,7 @@ await bucket.abortStaleMultipartUploads({ olderThan: "1d" });
 
 ## Errors
 
-Every failure throws a `BlobError` with a `code`: `not_found`, `already_exists`, `conflict`, `content_type_not_allowed`, `invalid_input`, `too_large`, `length_required`, `unauthorized`, `forbidden`, `rate_limited`, `move_left_a_copy` or `request_failed`. Retryable failures (`408`, `429`, `5xx`) are retried with backoff first, honoring `Retry-After`.
+Every failure throws a `BlobError` with a `code`: `not_found`, `already_exists`, `conflict`, `content_type_not_allowed`, `invalid_content_type_pattern`, `invalid_input`, `too_large`, `empty_body`, `length_required`, `signature_mismatch`, `unauthorized`, `forbidden`, `rate_limited`, `mint_backoff`, `not_ready`, `partial_delete`, `move_left_a_copy` or `request_failed`. Retryable failures (`408`, `429`, `5xx`) are retried with backoff first, honoring `Retry-After`.
 
 ```ts
 import { BlobError } from "@agentfs/sdk";
