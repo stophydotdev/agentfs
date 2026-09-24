@@ -16,6 +16,7 @@ export interface ClientOptions {
 }
 
 export interface WriteOptions {
+  readonly replace?: boolean;
   readonly contentType?: string;
   readonly cache?: string;
   readonly metadata?: Record<string, string>;
@@ -142,14 +143,15 @@ export const createClient = (options: ClientOptions) => {
       if (response.status === 200) return fileSchema.parse(await response.json());
       await policy.sleep(1000);
     }
-    throw new BlobError("request_failed", { message: `Upload ${id} is still finishing. Check it later with info().`, status: 504, retryable: true });
+    throw new BlobError("not_ready", { message: `Upload ${id} is still finishing. Check it later with info().`, status: 504, retryable: true });
   };
 
   const uploadInParts = async (path: string, blob: Blob, write: WriteOptions): Promise<StoredFile> => {
     const created = await withRetry(() => json(uploadSessionSchema, "/v1/uploads", jsonInit("POST", {
-      path,
+      path: encodePath(path),
       size_bytes: blob.size,
       multipart: true,
+      ...(write.replace ? { if_exists: "replace" } : {}),
       content_type: write.contentType ?? (blob.type || undefined),
       cache: write.cache,
       metadata: write.metadata,

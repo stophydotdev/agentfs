@@ -26,4 +26,5 @@ export type {
 export { verifyUploadCallback, type UploadCallback } from "./callback";
 export { BlobError, type BlobErrorCode, type BlobErrorOptions } from "./errors";
 export type { RetryPolicy } from "./retry";
+export { uniquePath } from "./unique-path";
 export { formatBytes, type CacheOption, type Duration, type Size } from "./units";

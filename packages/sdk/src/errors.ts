@@ -9,11 +9,15 @@ export type BlobErrorCode =
   | "too_large"
   | "empty_body"
   | "length_required"
+  | "signature_mismatch"
   | "unauthorized"
   | "forbidden"
   | "rate_limited"
+  | "mint_backoff"
+  | "not_ready"
   | "partial_delete"
   | "move_left_a_copy"
+  | "invalid_content_type_pattern"
   | "request_failed";
 
 const FROM_API: Record<string, BlobErrorCode> = {
@@ -40,6 +44,15 @@ const FROM_API: Record<string, BlobErrorCode> = {
   invalid_query: "invalid_input",
   invalid_expiration: "invalid_input",
   visibility_mismatch: "invalid_input",
+  object_not_ready: "not_ready",
+  upload_not_active: "not_ready",
+  upload_still_completing: "not_ready",
+  upload_unavailable: "mint_backoff",
+  empty_body: "empty_body",
+  SignatureDoesNotMatch: "signature_mismatch",
+  AccessDenied: "forbidden",
+  NoSuchKey: "not_found",
+  NoSuchUpload: "not_found",
 };
 
 export interface BlobErrorOptions {
@@ -91,7 +104,7 @@ const parseJson = (text: string): unknown => {
 export const errorFromResponse = async (response: Response, fallback: string): Promise<BlobError> => {
   const text = await response.text().catch(() => "");
   const problem = problemSchema.safeParse(parseJson(text));
-  const apiCode = problem.success ? problem.data.code ?? problem.data.title : undefined;
+  const apiCode = problem.success ? problem.data.code ?? problem.data.title : /<Code>([^<]*)<\/Code>/.exec(text)?.[1];
   const known = apiCode === undefined ? undefined : FROM_API[apiCode];
   const code = known ?? (response.status === 404 ? "not_found" : "request_failed");
   const message = (problem.success && problem.data.detail) || /<Message>([^<]*)<\/Message>/.exec(text)?.[1] || fallback;
