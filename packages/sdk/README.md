@@ -11,6 +11,8 @@ import { Bucket } from "@agentfs/sdk";
 
 const bucket = Bucket.fromEnv(); // AGENTFS_TOKEN, and AGENTFS_BUCKET or the key's default project
 
+const blob = await bucket.put(uniquePath`avatars/${file.name}`, file);
+
 const blob = await bucket.put("avatars/me.png", file, { contentType: "image/png" });
 blob.url;          // served at its path
 blob.versionedUrl; // url + ?v=<etag>, changes when the bytes do
@@ -60,42 +62,51 @@ await fetch(upload.url, { method: "PUT", headers: upload.headers, body: file });
 
 ## Browser uploads
 
-Your server mints a short-lived upload token for one path. The browser sends the bytes straight to AgentFS and never sees your key.
+Mount one route in your app. It checks who may upload and where the file goes; the browser sends the bytes straight to storage and never sees your key.
 
 ```ts
-// server
-const { token, path } = await bucket.uploadToken({
-  path: `avatars/${user.id}.png`,
-  maxSize: "2mb",
-  contentTypes: ["image/*"],
-  callbackUrl: "https://example.com/api/agentfs", // optional
+// app/api/upload/route.ts
+import { Bucket, uniquePath, uploadHandler } from "@agentfs/sdk";
+
+export const uploads = uploadHandler({
+  bucket: Bucket.fromEnv(),
+  constraints: { maxSize: "20mb", contentTypes: ["image/*", "application/pdf"] },
+  context: (request) => requireUser(request),
+  onBeforeUpload: ({ ctx, file }) => ({ path: uniquePath`${ctx.id}/${file.name}`, metadata: { owner: ctx.id } }),
+  onUploadComplete: ({ ctx, path, url }) => db.files.insert({ owner: ctx.id, path, url }),
 });
+
+export const { GET, POST } = uploads;
 ```
+
+`GET` serves the route's constraints. `POST` runs the upload in phases: `begin` checks the file (size, type and its first bytes) and calls `onBeforeUpload`, `parts` hands out part URLs, `end` records the file and returns what `onUploadComplete` returns, `cancel` aborts. `routes` mounts several named routes on one endpoint (`?route=avatar`), each inheriting the top-level options; `proxy: true` sends the bytes through your server instead. `uploadRoute<Ctx>()({ input, ... })` types a route's input and data.
 
 ```ts
 // browser
 import { upload } from "@agentfs/sdk/browser";
 
-const task = upload(file, { token, path, onProgress: (sent, total) => {} });
-const blob = await task.done;
+const task = upload(file, { route: "/api/upload" });
+task.subscribe(() => console.log(task.snapshot().percent));
+task.pause();
+task.resume();
+const blob = await task.done; // blob.data is what onUploadComplete returned
 ```
+
+Files over 16 MB go up in parallel parts with retries, pause and resume, and pick up where they left off after a reload when the user chooses the same file again.
 
 ```tsx
 // React
-import { useUpload } from "@agentfs/sdk/react";
+import { uploadHooks } from "@agentfs/sdk/react";
+import type { uploads } from "./api/upload/route";
 
-const avatar = useUpload({ getTarget: (file) => fetch("/api/upload-token", { method: "POST" }).then((r) => r.json()) });
-// avatar.start(file), avatar.status, avatar.percent, avatar.blob, avatar.error, avatar.cancel()
+export const { useUpload, useServerUpload } = uploadHooks<typeof uploads>();
+
+const avatar = useUpload();
+// <input type="file" accept={avatar.accept} onChange={(e) => avatar.start(e.target.files![0])} />
+// avatar.upload?.status, .percent, .blob?.data, .error, .pause(), .resume(), .cancel()
 ```
 
-With `callbackUrl`, AgentFS posts `upload.completed` when the file is stored. Check it with the `callbackSecret` from `uploadToken`:
-
-```ts
-import { verifyUploadCallback } from "@agentfs/sdk";
-
-const event = await verifyUploadCallback(secret, request.headers.get("agentfs-signature"), await request.text());
-if (event) await db.files.insert({ path: event.data.file.path });
-```
+Route names and completion data are checked at compile time. Uploads from other sites must come from an origin in the project's allowed origins.
 
 ## Multipart housekeeping
 

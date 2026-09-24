@@ -24,6 +24,23 @@ export type {
   UploadTokenOptions,
 } from "./bucket";
 export { verifyUploadCallback, type UploadCallback } from "./callback";
+export { uploadHandler, uploadRoute } from "./handler";
+export type {
+  AnyUploadHandler,
+  BeforeUploadArgs,
+  BeforeUploadResult,
+  HandlerRoutes,
+  RouteConstraints,
+  StandardSchema,
+  UploadBuilder,
+  UploadCompleteArgs,
+  UploadErrorArgs,
+  UploadHandler,
+  UploadHandlerOptions,
+  UploadRouteDefinition,
+  UploadRouteOptions,
+} from "./handler";
+export type { ServedConstraints, UploadedBlob, UploadFile } from "./wire";
 export { BlobError, type BlobErrorCode, type BlobErrorOptions } from "./errors";
 export type { RetryPolicy } from "./retry";
 export { uniquePath } from "./unique-path";
