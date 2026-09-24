@@ -645,7 +645,7 @@ export class Bucket {
 
   async signedReadUrl(path: string, options: SignedReadUrlOptions = {}): Promise<SignedReadUrl> {
     const signed = await this.#client.json(signedUrlSchema, `/v1/files/${await this.#wire(path)}/signed-url`, this.#client.jsonInit("POST", {
-      expires_in: wireDuration(options.expiresIn ?? "1h", "expiresIn", 1),
+      expires_in: wireDuration(options.expiresIn ?? "5m", "expiresIn", 1),
       download_as: options.downloadAs,
       content_type: options.contentType,
     }));
