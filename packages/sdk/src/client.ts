@@ -166,7 +166,7 @@ export const createClient = (options: ClientOptions) => {
     return complete(created.id, write.signal);
   };
 
-  return { send, json, jsonInit, putFile, uploadInParts, policy };
+  return { send, json, jsonInit, putFile, uploadInParts, complete, policy };
 };
 
 export type Client = ReturnType<typeof createClient>;

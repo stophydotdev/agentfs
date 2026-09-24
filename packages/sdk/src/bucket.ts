@@ -202,6 +202,22 @@ const multipartThreshold = (option: MultipartOption | undefined): number => {
   return parseSize(option ?? DEFAULT_MULTIPART, "multipart");
 };
 
+export interface BucketInternals {
+  readonly client: Client;
+  readonly token: string;
+  readonly baseUrl: string;
+  readonly wire: (path: string) => Promise<string>;
+  readonly completed: (file: StoredFile) => Promise<CompletedBlob>;
+}
+
+const INTERNALS = new WeakMap<Bucket, BucketInternals>();
+
+export const internalsOf = (bucket: Bucket): BucketInternals => {
+  const internals = INTERNALS.get(bucket);
+  if (!internals) throw new TypeError("expected a Bucket");
+  return internals;
+};
+
 export class Bucket {
   readonly #client: Client;
   readonly #defaultCache: CacheOption | undefined;
@@ -213,6 +229,13 @@ export class Bucket {
     this.#client = createClient(options);
     this.#defaultCache = options.cache;
     if (options.bucket) this.#project = Promise.resolve(options.bucket);
+    INTERNALS.set(this, {
+      client: this.#client,
+      token: options.token,
+      baseUrl: (options.baseUrl ?? "https://agentfs.cloud").replace(/\/+$/, ""),
+      wire: (path) => this.#wire(path),
+      completed: async (file) => ({ ...(await this.#object(file)), contentType: file.content_type }),
+    });
   }
 
   static fromEnv(options?: FromEnvOptions): Bucket;

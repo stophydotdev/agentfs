@@ -31,7 +31,8 @@ export const uploadSessionSchema = z.object({
   upload_url: z.string().optional(),
   upload_url_expires_at: z.string().optional(),
   expires_at: z.string().optional(),
-  uploaded_parts: z.array(z.object({ part_number: z.number() })).default([]),
+  expected_size_bytes: z.number().optional(),
+  uploaded_parts: z.array(z.object({ part_number: z.number(), etag: z.string().optional() })).default([]),
 });
 
 export const partUrlsSchema = z.object({

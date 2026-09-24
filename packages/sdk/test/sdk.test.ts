@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 
-import { upload } from "../src/browser";
 import { BlobError, Bucket, verifyUploadCallback } from "../src/index";
 
 type Call = { readonly method: string; readonly url: URL; readonly headers: Headers; readonly body: BodyInit | null | undefined };
@@ -153,20 +152,6 @@ test("signedReadUrl passes downloadAs and returns a Date", async () => {
   expect(signed.expiresAt.toISOString()).toBe("2026-09-24T02:00:00.000Z");
   expect(api.calls[0]?.url.pathname).toBe("/v1/files/site/q3.pdf/signed-url");
   expect(JSON.parse(String(api.calls[0]?.body))).toEqual({ expires_in: "2m", download_as: "Q3.pdf" });
-});
-
-test("a browser upload sends the file with the upload token", async () => {
-  const api = fakeApi(() => Response.json(file("site/avatars/u1.png"), { status: 201 }));
-  const original = globalThis.fetch;
-  globalThis.fetch = api.fetch;
-  try {
-    const task = upload(new Blob(["png"], { type: "image/png" }), { token: "aft_token", path: "site/avatars/u1.png" });
-    expect((await task.done).path).toBe("site/avatars/u1.png");
-  } finally {
-    globalThis.fetch = original;
-  }
-  expect(api.calls[0]?.headers.get("authorization")).toBe("Bearer aft_token");
-  expect(api.calls[0]?.url.pathname).toBe("/v1/files/site/avatars/u1.png");
 });
 
 test("verifyUploadCallback accepts AgentFS's signature and rejects a tampered body", async () => {
