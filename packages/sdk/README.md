@@ -132,7 +132,7 @@ Keys are the same paths `put` writes, so both see the same files. One `PutObject
 
 ## Errors
 
-Every failure throws a `BlobError` with a `code`: `not_found`, `already_exists`, `conflict`, `content_type_not_allowed`, `invalid_content_type_pattern`, `invalid_input`, `too_large`, `empty_body`, `length_required`, `signature_mismatch`, `unauthorized`, `forbidden`, `rate_limited`, `mint_backoff`, `not_ready`, `partial_delete`, `move_left_a_copy` or `request_failed`. Retryable failures (`408`, `429`, `5xx`) are retried with backoff first, honoring `Retry-After`.
+Every failure throws a `BlobError` with a `code`: `not_found`, `already_exists`, `conflict`, `content_type_not_allowed`, `invalid_content_type_pattern`, `invalid_input`, `too_large`, `empty_body`, `length_required`, `signature_mismatch`, `unauthorized`, `forbidden`, `rate_limited`, `mint_backoff`, `not_ready`, `partial_delete`, `move_left_a_copy` or `request_failed`. Reads, writes, copies and deletes that fail with `429`, `5xx` or a dropped connection are tried up to 3 times with jittered backoff, honoring `Retry-After` up to 10 seconds. Streamed bodies are sent once.
 
 ```ts
 import { BlobError } from "@agentfs/sdk";
