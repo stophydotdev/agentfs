@@ -222,3 +222,22 @@ test("large overwrites and upload URLs replace atomically", async () => {
   expect(upload).toEqual({ url: "https://r2.test/put2", headers: {}, expiresAt: new Date("2026-09-24T02:00:00.000Z") });
   expect(JSON.parse(String(api.calls.at(-1)?.body))).toEqual({ if_exists: "replace" });
 });
+
+test("s3() hands the AWS SDK an endpoint and refreshing credentials", async () => {
+  let minted = 0;
+  const api = fakeApi(() => {
+    minted += 1;
+    return Response.json({
+      access_key_id: `AFS${minted}`, secret_access_key: "secret", session_token: "afss_token",
+      expiration: new Date(Date.now() + (minted === 1 ? 60_000 : 3_600_000)).toISOString(),
+      endpoint: "https://agentfs.cloud/s3", region: "auto",
+    }, { status: 201 });
+  });
+  const config = new Bucket({ token: "afs_key", bucket: "site", fetch: api.fetch }).s3();
+  expect(config).toMatchObject({ region: "auto", bucket: "site", forcePathStyle: true });
+  expect((await config.endpoint()).url.href).toBe("https://agentfs.cloud/s3");
+  expect((await config.credentials()).accessKeyId).toBe("AFS2");
+  expect((await config.credentials()).accessKeyId).toBe("AFS2");
+  expect(minted).toBe(2);
+  expect(() => new Bucket({ token: "afs_key", fetch: api.fetch }).s3()).toThrow();
+});

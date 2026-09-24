@@ -8,6 +8,7 @@ import {
   fileSchema,
   openUploadsSchema,
   projectSettingsSchema,
+  s3CredentialsSchema,
   signedUrlSchema,
   uploadSessionSchema,
   uploadTokenSchema,
@@ -135,6 +136,23 @@ export interface AbortStaleMultipartOptions {
   prefix?: string;
 }
 
+export interface S3Credentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken: string;
+  expiration: Date;
+}
+
+export interface S3Config {
+  endpoint: () => Promise<{ url: URL }>;
+  region: string;
+  bucket: string;
+  forcePathStyle: true;
+  credentials: () => Promise<S3Credentials>;
+}
+
+const REFRESH_MARGIN_MS = 5 * 60 * 1000;
+
 export type DeleteTarget = string | string[] | { prefix: string; all?: boolean };
 
 export interface UploadTokenOptions {
@@ -223,12 +241,14 @@ export class Bucket {
   readonly #defaultCache: CacheOption | undefined;
   #project: Promise<string> | undefined;
   #settings: Promise<ProjectSettings> | undefined;
+  readonly #bucketName: string | undefined;
 
   constructor(options: BucketOptions) {
     if (!options.token) throw new BlobError("unauthorized", { message: "A token is required: pass { token } or set AGENTFS_TOKEN.", status: 401 });
     this.#client = createClient(options);
     this.#defaultCache = options.cache;
     if (options.bucket) this.#project = Promise.resolve(options.bucket);
+    this.#bucketName = options.bucket;
     INTERNALS.set(this, {
       client: this.#client,
       token: options.token,
@@ -483,6 +503,39 @@ export class Bucket {
       ...(options.prefix ? { prefix: await this.#wire(options.prefix) } : {}),
     }));
     return Promise.all(aborted.items.map(async (item) => ({ path: await this.#relative(item.path), uploadId: item.id, initiatedAt: new Date(item.created_at) })));
+  }
+
+  s3(): S3Config {
+    const name = this.#bucketName;
+    if (!name) throw new BlobError("invalid_input", { message: "s3() needs the bucket name: pass { bucket } to the Bucket or set AGENTFS_BUCKET" });
+    let current: Promise<{ credentials: S3Credentials; endpoint: string }> | undefined;
+    let expiresAt = 0;
+    const fresh = (): Promise<{ credentials: S3Credentials; endpoint: string }> => {
+      if (current && expiresAt - Date.now() >= REFRESH_MARGIN_MS) return current;
+      expiresAt = Number.POSITIVE_INFINITY;
+      current = this.#client.json(s3CredentialsSchema, "/v1/credentials", this.#client.jsonInit("POST", { expires_in: "1h" })).then((minted) => {
+        const credentials = {
+          accessKeyId: minted.access_key_id,
+          secretAccessKey: minted.secret_access_key,
+          sessionToken: minted.session_token,
+          expiration: new Date(minted.expiration),
+        };
+        expiresAt = credentials.expiration.getTime();
+        return { credentials, endpoint: minted.endpoint };
+      });
+      current.catch(() => {
+        current = undefined;
+        expiresAt = 0;
+      });
+      return current;
+    };
+    return {
+      endpoint: async () => ({ url: new URL((await fresh()).endpoint) }),
+      region: "auto",
+      bucket: name,
+      forcePathStyle: true,
+      credentials: async () => (await fresh()).credentials,
+    };
   }
 
   async uploadToken(options: UploadTokenOptions): Promise<UploadToken> {

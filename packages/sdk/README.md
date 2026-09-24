@@ -114,6 +114,20 @@ await bucket.abortMultipartUpload({ uploadId });
 await bucket.abortStaleMultipartUploads({ olderThan: "1d" });
 ```
 
+## S3 clients
+
+Buckets speak the S3 API, so the AWS SDK, the AWS CLI and other S3 tools work too. `bucket.s3()` gives the AWS SDK an endpoint and credentials that refresh themselves:
+
+```ts
+import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+
+const config = bucket.s3();
+const s3 = new S3Client(config);
+await s3.send(new GetObjectCommand({ Bucket: config.bucket, Key: "reports/q3.pdf" }));
+```
+
+Keys are the same paths `put` writes, so both see the same files. One `PutObject` takes up to 100 MB; larger objects go up with multipart, which `@aws-sdk/lib-storage` and the AWS CLI do on their own. Use it for what the SDK doesn't wrap, like byte ranges.
+
 ## Errors
 
 Every failure throws a `BlobError` with a `code`: `not_found`, `already_exists`, `conflict`, `content_type_not_allowed`, `invalid_content_type_pattern`, `invalid_input`, `too_large`, `empty_body`, `length_required`, `signature_mismatch`, `unauthorized`, `forbidden`, `rate_limited`, `mint_backoff`, `not_ready`, `partial_delete`, `move_left_a_copy` or `request_failed`. Retryable failures (`408`, `429`, `5xx`) are retried with backoff first, honoring `Retry-After`.

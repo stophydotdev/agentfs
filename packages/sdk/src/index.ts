@@ -15,6 +15,8 @@ export type {
   MultipartUpload,
   PutBody,
   PutOptions,
+  S3Config,
+  S3Credentials,
   SignedReadUrl,
   SignedReadUrlOptions,
   SignedUploadUrl,
