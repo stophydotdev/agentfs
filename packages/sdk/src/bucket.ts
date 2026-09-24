@@ -1,4 +1,4 @@
-import { createClient, encodePath, type Client } from "./client";
+import { createClient, encodePath, type Client, type Source, type WriteOptions } from "./client";
 import { BlobError } from "./errors";
 import type { RetryPolicy } from "./retry";
 import {
@@ -16,10 +16,11 @@ import {
   type StoredFile,
 } from "./schemas";
 import { checkContentType, expandContentTypes, SNIFF_BYTES } from "./sniff";
-import { formatBytes, parseSize, type CacheOption, type Duration, type Size } from "./units";
+import { cacheControl, formatBytes, parseSize, wireCache, wireDuration, type CacheOption, type Duration, type Size } from "./units";
 
 const ONE_REQUEST_LIMIT = 100 * 1024 * 1024;
-const DEFAULT_MULTIPART = "16mb";
+const MULTIPART_THRESHOLD = 16_000_000;
+const SINGLE_PUT_MAX = 5 * 1024 * 1024 * 1024;
 const LIST_LIMIT = 1000;
 const ACTIVE_EXTENSIONS = /\.(html?|xhtml|svg|xml)$/i;
 const DELETE_BATCH = 1000;
@@ -131,9 +132,12 @@ export interface MultipartUpload {
   initiatedAt: Date;
 }
 
-export interface AbortStaleMultipartOptions {
-  olderThan: Duration;
+export interface ListMultipartOptions {
   prefix?: string;
+}
+
+export interface AbortStaleMultipartOptions extends ListMultipartOptions {
+  olderThan: Duration;
 }
 
 export interface S3Credentials {
@@ -174,50 +178,108 @@ export interface UploadToken {
 const envValue = (name: string): string | undefined =>
   (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[name] || undefined;
 
-const readCapped = async (stream: ReadableStream<Uint8Array>, cap: number): Promise<Uint8Array<ArrayBuffer>[]> => {
-  const chunks: Uint8Array<ArrayBuffer>[] = [];
-  let total = 0;
+type Resolved =
+  | { readonly blob: Blob; readonly contentType: string | undefined }
+  | { readonly stream: ReadableStream<Uint8Array>; readonly size: number | undefined; readonly contentType: string | undefined };
+
+const resolveBody = (body: PutBody): Resolved => {
+  if (body instanceof Request) {
+    if (body.body === null || body.bodyUsed) throw new BlobError("empty_body", { message: "the request has no body" });
+    const length = body.headers.get("content-length");
+    return { stream: body.body, size: length !== null && /^\d+$/.test(length) ? Number(length) : undefined, contentType: body.headers.get("content-type") ?? undefined };
+  }
+  if (body instanceof Blob) return { blob: body, contentType: body.type || undefined };
+  if (body instanceof ReadableStream) return { stream: body, size: undefined, contentType: undefined };
+  if (typeof body === "string" || body instanceof ArrayBuffer || ArrayBuffer.isView(body)) return { blob: new Blob([body]), contentType: undefined };
+  throw new TypeError("put() body must be a Request, Blob, ArrayBuffer, typed array, string or ReadableStream");
+};
+
+const concat = (chunks: readonly Uint8Array[]): Uint8Array<ArrayBuffer> => {
+  const out = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+};
+
+const peek = async (stream: ReadableStream<Uint8Array>): Promise<{ head: Uint8Array; stream: ReadableStream<Uint8Array> }> => {
   const reader = stream.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return chunks;
-    total += value.byteLength;
-    if (total > cap) {
-      await reader.cancel();
-      throw new BlobError("too_large", { message: `The body is over the ${formatBytes(cap)} limit`, status: 413 });
+  const chunks: Uint8Array[] = [];
+  let got = 0;
+  let ended = false;
+  while (got < SNIFF_BYTES) {
+    const { value, done } = await reader.read();
+    if (done) {
+      ended = true;
+      break;
     }
-    chunks.push(new Uint8Array(value));
+    chunks.push(value);
+    got += value.byteLength;
+  }
+  const buffered = concat(chunks);
+  const replay = new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (buffered.byteLength) controller.enqueue(buffered);
+      if (ended) controller.close();
+    },
+    async pull(controller) {
+      const { value, done } = await reader.read();
+      if (done) controller.close();
+      else controller.enqueue(value);
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+  return { head: buffered.subarray(0, SNIFF_BYTES), stream: replay };
+};
+
+const readAll = async (stream: ReadableStream<Uint8Array>, maxSize: number): Promise<Uint8Array<ArrayBuffer>> => {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let got = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return concat(chunks);
+    got += value.byteLength;
+    if (got > maxSize) {
+      await reader.cancel();
+      throw new BlobError("too_large", { message: `body exceeds maxSize (${maxSize} bytes)` });
+    }
+    chunks.push(value);
   }
 };
 
-const toBlob = async (body: PutBody | null | undefined, contentType: string | undefined, size: number | undefined, maxSize: number | undefined): Promise<Blob> => {
-  if (body === null || body === undefined) throw new BlobError("empty_body", { message: "put() needs a body" });
-  const typed = (parts: BlobPart[], type = contentType): Blob => new Blob(parts, type ? { type } : {});
-  if (body instanceof Blob) return contentType && body.type !== contentType ? typed([body]) : body;
-  if (!(body instanceof Request) && !(body instanceof ReadableStream)) return typed([body]);
-  const type = contentType ?? (body instanceof Request ? body.headers.get("content-type") ?? undefined : undefined);
-  const stream = body instanceof Request ? body.body : body;
-  if (!stream) return typed([], type);
-  const header = body instanceof Request ? body.headers.get("content-length") : null;
-  const length = size ?? (header === null ? undefined : Number(header));
-  if (length === undefined && maxSize === undefined) {
-    throw new BlobError("length_required", { message: "A stream carries no length: pass size (exact) or maxSize (buffers up to the cap)", status: 411 });
-  }
-  const blob = typed(await readCapped(stream, length ?? maxSize ?? 0), type);
-  if (length !== undefined && blob.size !== length) {
-    throw new BlobError("invalid_input", { message: `The body is ${blob.size} bytes, not the declared ${length}` });
-  }
-  return blob;
+const limit = (stream: ReadableStream<Uint8Array>, maxSize: number): ReadableStream<Uint8Array> => {
+  let seen = 0;
+  return stream.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      seen += chunk.byteLength;
+      if (seen > maxSize) throw new BlobError("too_large", { message: `body exceeds maxSize (${maxSize} bytes)` });
+      controller.enqueue(chunk);
+    },
+  }));
 };
+
+const unwrap = (error: unknown): unknown =>
+  !BlobError.is(error) && typeof error === "object" && error !== null && "cause" in error && BlobError.is(error.cause) ? error.cause : error;
 
 const decodePath = (path: string): string => path.split("/").map(decodeURIComponent).join("/");
 
-
-
-const multipartThreshold = (option: MultipartOption | undefined): number => {
-  if (option === true) return 0;
-  if (option === false) return Number.POSITIVE_INFINITY;
-  return parseSize(option ?? DEFAULT_MULTIPART, "multipart");
+const wantsMultipart = (option: MultipartOption | undefined, size: number): boolean => {
+  if (size > SINGLE_PUT_MAX) {
+    if (option === false) {
+      throw new BlobError("too_large", {
+        message: `${formatBytes(size)} is over the ${formatBytes(SINGLE_PUT_MAX)} a single PUT can carry`,
+        hint: "multipart: false forbids the parts this body needs",
+      });
+    }
+    return true;
+  }
+  if (typeof option === "boolean") return option;
+  return size > (option === undefined ? MULTIPART_THRESHOLD : parseSize(option, "multipart"));
 };
 
 export interface BucketInternals {
@@ -305,40 +367,97 @@ export class Bucket {
   async put(path: string, body: PutBody, options: PutOptions = {}): Promise<CompletedBlob> {
     const allowed = options.contentTypes === undefined ? undefined : expandContentTypes(options.contentTypes);
     const maxSize = options.maxSize === undefined ? undefined : parseSize(options.maxSize, "maxSize");
-    if (maxSize !== undefined && options.size !== undefined && options.size > maxSize) {
-      throw new BlobError("too_large", { message: `The body is ${formatBytes(options.size)}, over the ${formatBytes(maxSize)} limit`, status: 413 });
+    const resolved = resolveBody(body);
+    const contentType = options.contentType ?? resolved.contentType ?? "application/octet-stream";
+    let source: Source;
+    if ("blob" in resolved) source = resolved.blob;
+    else {
+      const size = resolved.size ?? (options.size === undefined ? undefined : parseSize(options.size, "size"));
+      if (size === undefined) {
+        if (maxSize === undefined) throw new BlobError("length_required");
+        source = new Blob([await readAll(resolved.stream, maxSize)]);
+      } else source = { stream: resolved.stream, size };
     }
-    const blob = await toBlob(body, options.contentType, options.size, maxSize);
-    const contentType = options.contentType ?? (blob.type || "application/octet-stream");
-    if (maxSize !== undefined && blob.size > maxSize) {
-      throw new BlobError("too_large", { message: `The body is ${formatBytes(blob.size)}, over the ${formatBytes(maxSize)} limit`, status: 413 });
+    if (maxSize !== undefined && source.size > maxSize) {
+      if (!(source instanceof Blob)) await source.stream.cancel().catch(() => undefined);
+      throw new BlobError("too_large", { message: `the body is ${formatBytes(source.size)}, over the ${formatBytes(maxSize)} limit` });
     }
-    if (allowed) checkContentType(contentType, new Uint8Array(await blob.slice(0, SNIFF_BYTES).arrayBuffer()), allowed);
+    if (allowed) {
+      if (source instanceof Blob) checkContentType(contentType, new Uint8Array(await source.slice(0, SNIFF_BYTES).arrayBuffer()), allowed);
+      else {
+        const peeked = await peek(source.stream);
+        source = { stream: peeked.stream, size: source.size };
+        try {
+          checkContentType(contentType, peeked.head, allowed);
+        } catch (error) {
+          await peeked.stream.cancel().catch(() => undefined);
+          throw error;
+        }
+      }
+    }
+    if (!(source instanceof Blob)) {
+      if (source.size === 0) {
+        await source.stream.cancel().catch(() => undefined);
+        source = new Blob([]);
+      } else if (maxSize !== undefined) source = { stream: limit(source.stream, maxSize), size: source.size };
+    }
     const conditional = options.allowOverwrite === false || options.ifUnchanged !== undefined;
     if (options.multipart === true && conditional) {
       throw new BlobError("invalid_input", { message: "multipart: allowOverwrite: false and ifUnchanged are single-PUT only" });
     }
     const cache = options.cache ?? this.#defaultCache;
-    const write = {
+    const write: WriteOptions = {
       contentType,
-      ...(cache ? { cache } : {}),
+      ...(cache === undefined ? {} : { cache: wireCache(cache) }),
       ...(options.metadata ? { metadata: options.metadata } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),
     };
-    const full = await this.#full(path);
-    const inParts = !conditional && blob.size > 0 && (blob.size > multipartThreshold(options.multipart) || blob.size > ONE_REQUEST_LIMIT);
-    if (!inParts && blob.size > ONE_REQUEST_LIMIT) {
-      throw new BlobError("invalid_input", { message: "allowOverwrite: false and ifUnchanged work on files up to 100 MB" });
-    }
-    const stored = inParts
-      ? await this.#client.uploadInParts(full, blob, { ...write, replace: true })
-      : await this.#client.putFile(full, blob, {
-          ...write,
-          ...(options.allowOverwrite === false ? { ifNoneMatch: true } : {}),
-          ...(options.ifUnchanged === undefined ? {} : { ifMatch: options.ifUnchanged }),
+    try {
+      const stored = await this.#write(await this.#full(path), source, write, options, conditional);
+      return { ...(await this.#object(stored)), contentType: stored.content_type };
+    } catch (error) {
+      if (!(source instanceof Blob)) await source.stream.cancel().catch(() => undefined);
+      const cause = unwrap(error);
+      if (!BlobError.is(cause)) throw cause;
+      if (cause.code === "already_exists" || (cause.code === "conflict" && options.allowOverwrite === false)) {
+        const head = await this.#head(path).catch(() => undefined);
+        throw new BlobError("already_exists", {
+          message: `${path} already exists`,
+          cause,
+          ...(head?.etag ? { etag: head.etag } : {}),
+          ...(head ? { size: head.size } : {}),
         });
-    return { ...(await this.#object(stored)), contentType: stored.content_type };
+      }
+      throw cause;
+    }
+  }
+
+  async #write(full: string, source: Source, write: WriteOptions, options: PutOptions, conditional: boolean): Promise<StoredFile> {
+    if (source.size > 0 && wantsMultipart(options.multipart, source.size) && !conditional) {
+      return this.#client.upload(full, source, { ...write, multipart: true, ifExists: "replace" });
+    }
+    const ifMatch = options.ifUnchanged === undefined ? {} : { ifMatch: options.ifUnchanged };
+    if (source.size <= ONE_REQUEST_LIMIT) {
+      return this.#client.putFile(full, source, { ...write, ...ifMatch, ...(options.allowOverwrite === false ? { ifNoneMatch: true } : {}) });
+    }
+    if (source.size > SINGLE_PUT_MAX) {
+      throw new BlobError("too_large", {
+        message: `${formatBytes(source.size)} is over the ${formatBytes(SINGLE_PUT_MAX)} a single PUT can carry`,
+        hint: "allowOverwrite: false and ifUnchanged are single-PUT only",
+      });
+    }
+    return this.#client.upload(full, source, { ...write, ...ifMatch, multipart: false, ifExists: options.allowOverwrite === false ? "error" : "replace" });
+  }
+
+  async #head(path: string): Promise<{ etag: string; size: number } | undefined> {
+    try {
+      const response = await this.#client.send(`/v1/files/${await this.#wire(path)}`, { method: "HEAD" });
+      return { etag: response.headers.get("etag") ?? "", size: Number(response.headers.get("content-length") ?? 0) };
+    } catch (error) {
+      if (BlobError.is(error) && error.code === "not_found") return undefined;
+      throw error;
+    }
   }
 
   async info(path: string): Promise<BlobInfo> {
@@ -369,17 +488,15 @@ export class Bucket {
   }
 
   async exists(path: string): Promise<boolean> {
-    try {
-      await this.#client.send(`/v1/files/${await this.#wire(path)}`, { method: "HEAD" });
-      return true;
-    } catch (error) {
-      if (BlobError.is(error) && error.code === "not_found") return false;
-      throw error;
-    }
+    return (await this.#head(path)) !== undefined;
   }
 
   async list(options: ListOptions = {}): Promise<ListPage> {
-    const query = new URLSearchParams({ starts_with: await this.#full(options.prefix ?? ""), limit: String(Math.min(Math.max(options.limit ?? LIST_LIMIT, 1), LIST_LIMIT)) });
+    const query = new URLSearchParams({
+      starts_with: await this.#full(options.prefix ?? ""),
+      order: "path",
+      limit: String(Math.min(Math.max(Math.floor(options.limit ?? LIST_LIMIT), 1), LIST_LIMIT)),
+    });
     if (options.cursor) query.set("cursor", options.cursor);
     const page = await this.#client.json(fileListSchema, `/v1/files?${query}`);
     return { blobs: await Promise.all(page.items.map((file) => this.#object(file))), cursor: page.next_cursor ?? undefined };
@@ -388,8 +505,9 @@ export class Bucket {
   async copy(from: string, to: string, options: CopyOptions = {}): Promise<BlobObject> {
     const copied = await this.#client.json(fileSchema, `/v1/files/${await this.#wire(from)}/copy`, this.#client.jsonInit("POST", {
       to: await this.#wire(to),
+      if_exists: "replace",
       content_type: options.contentType,
-      cache: options.cache,
+      cache: options.cache === undefined ? undefined : wireCache(options.cache),
       metadata: options.metadata,
     }));
     return this.#object(copied);
@@ -397,61 +515,114 @@ export class Bucket {
 
   async move(from: string, to: string, options: CopyOptions = {}): Promise<BlobObject> {
     if (options.contentType === undefined && options.cache === undefined && options.metadata === undefined) {
-      const moved = await this.#client.json(fileSchema, `/v1/files/${await this.#wire(from)}/move`, this.#client.jsonInit("POST", { to: await this.#wire(to) }));
+      const moved = await this.#client.json(fileSchema, `/v1/files/${await this.#wire(from)}/move`, this.#client.jsonInit("POST", { to: await this.#wire(to), if_exists: "replace" }));
       return this.#object(moved);
     }
     const copied = await this.copy(from, to, options);
-    await this.del(from).catch((error: unknown) => {
-      throw new BlobError("move_left_a_copy", { message: `${to} was written but ${from} could not be deleted: ${String(error)}`, status: 500 });
-    });
+    try {
+      await this.del(from);
+    } catch (error) {
+      throw new BlobError("move_left_a_copy", { message: `moved ${from} to ${to} but could not delete the source`, cause: error });
+    }
     return copied;
   }
 
   async updateJson<T = unknown>(path: string, fn: (previous: T | null) => T | Promise<T>, options: UpdateJsonOptions = {}): Promise<BlobObject> {
     const attempts = options.maxAttempts ?? 6;
-    for (let attempt = 1; ; attempt += 1) {
-      const current = await this.get(path).catch((error: unknown) => {
-        if (BlobError.is(error) && error.code === "not_found") return null;
-        throw error;
-      });
-      const previous: T | null = current ? JSON.parse(await new Response(current.body).text()) : null;
+    if (!Number.isInteger(attempts) || attempts < 1) throw new BlobError("invalid_input", { message: "maxAttempts must be a positive integer" });
+    let lastError: BlobError | undefined;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      let previous: T | null = null;
+      let etag: string | undefined;
+      let metadata: Record<string, string> | undefined;
+      try {
+        const current = await this.get(path);
+        const text = await new Response(current.body).text();
+        previous = text.length ? JSON.parse(text) : null;
+        etag = current.etag;
+        metadata = current.metadata;
+      } catch (error) {
+        if (!BlobError.is(error) || error.code !== "not_found") throw error;
+      }
       const next = await fn(previous);
+      const keep = options.metadata ?? metadata;
       try {
         return await this.put(path, JSON.stringify(next), {
           contentType: "application/json",
-          ...(current ? { ifUnchanged: current.etag } : { allowOverwrite: false }),
-          ...(options.cache ? { cache: options.cache } : {}),
-          ...(options.metadata ? { metadata: options.metadata } : {}),
+          ...(options.cache === undefined ? {} : { cache: options.cache }),
+          ...(keep ? { metadata: keep } : {}),
+          ...(etag === undefined ? { allowOverwrite: false } : { ifUnchanged: etag }),
         });
       } catch (error) {
-        const raced = BlobError.is(error) && (error.code === "conflict" || error.code === "already_exists");
-        if (!raced || attempt >= attempts) throw error;
-        await this.#client.policy.sleep(Math.min(2000, 50 * 2 ** attempt) * this.#client.policy.random());
+        if (!BlobError.is(error) || (error.code !== "conflict" && error.code !== "already_exists")) throw error;
+        lastError = error;
+        if (attempt < attempts) await this.#client.policy.sleep(Math.floor(this.#client.policy.random() * Math.min(4000, 25 * 2 ** attempt)));
       }
     }
+    throw new BlobError("conflict", { message: `${path} kept changing across ${attempts} attempt${attempts === 1 ? "" : "s"}`, cause: lastError });
   }
 
   async del(target: DeleteTarget): Promise<void> {
     if (typeof target === "string") {
-      await this.#client.send(`/v1/files/${await this.#wire(target)}`, { method: "DELETE" });
-      return;
-    }
-    if (Array.isArray(target)) {
-      const paths = await Promise.all(target.map((path) => this.#wire(path)));
-      for (let index = 0; index < paths.length; index += DELETE_BATCH) {
-        await this.#client.json(deletedSchema, "/v1/files/delete", this.#client.jsonInit("POST", { paths: paths.slice(index, index + DELETE_BATCH) }))
-          .catch((error: unknown) => {
-            if (index === 0) throw error;
-            throw new BlobError("partial_delete", { message: `Deleted ${index} of ${paths.length} paths before failing: ${String(error)}`, status: 500 });
-          });
+      try {
+        await this.#client.send(`/v1/files/${await this.#wire(target)}`, { method: "DELETE" });
+      } catch (error) {
+        if (!BlobError.is(error) || error.code !== "not_found") throw error;
       }
       return;
     }
-    if (!target.prefix && !target.all) throw new BlobError("invalid_input", { message: "del({ prefix: \"\" }) deletes the whole bucket; pass all: true to mean it" });
-    const startsWith = await this.#full(target.prefix);
-    for (let more = true; more;) {
-      more = (await this.#client.json(deletedSchema, "/v1/files/delete", this.#client.jsonInit("POST", { starts_with: startsWith }))).has_more;
+    if (Array.isArray(target)) {
+      const failed: string[] = [];
+      let cause: unknown;
+      for (let index = 0; index < target.length; index += DELETE_BATCH) {
+        const batch = target.slice(index, index + DELETE_BATCH);
+        const paths = await Promise.all(batch.map((path) => this.#wire(path)));
+        try {
+          await this.#client.json(deletedSchema, "/v1/files/delete", this.#client.jsonInit("POST", { paths }));
+        } catch (error) {
+          cause = error;
+          failed.push(...(await this.#survivors(batch, error)));
+        }
+      }
+      if (failed.length) throw new BlobError("partial_delete", { message: `${failed.length} of ${target.length} paths were not deleted`, failed, cause });
+      return;
     }
+    if (typeof target?.prefix !== "string") throw new BlobError("invalid_input", { message: "del: expected a path, an array of paths, or { prefix }" });
+    if (target.prefix === "" && target.all !== true) {
+      throw new BlobError("invalid_input", {
+        message: "del({ prefix: '' }) would delete every object in the bucket",
+        hint: "pass { prefix: '', all: true } if that is what you mean",
+      });
+    }
+    const startsWith = await this.#full(target.prefix);
+    try {
+      for (let more = true; more;) {
+        more = (await this.#client.json(deletedSchema, "/v1/files/delete", this.#client.jsonInit("POST", { starts_with: startsWith }))).has_more;
+      }
+    } catch (error) {
+      const failed: string[] = [];
+      try {
+        let cursor: string | undefined;
+        do {
+          const page = await this.list({ prefix: target.prefix, limit: LIST_LIMIT, ...(cursor ? { cursor } : {}) });
+          failed.push(...page.blobs.map((blob) => blob.path));
+          cursor = page.cursor;
+        } while (cursor);
+      } catch {
+        throw error;
+      }
+      if (failed.length) throw new BlobError("partial_delete", { message: `${failed.length} paths under ${target.prefix} were not deleted`, failed, cause: error });
+    }
+  }
+
+  async #survivors(paths: readonly string[], error: unknown): Promise<string[]> {
+    const survivors: string[] = [];
+    try {
+      for (const path of paths) if (await this.exists(path)) survivors.push(path);
+    } catch {
+      throw error;
+    }
+    return survivors;
   }
 
   async publicUrl(path: string): Promise<string | undefined> {
@@ -463,7 +634,7 @@ export class Bucket {
 
   async signedReadUrl(path: string, options: SignedReadUrlOptions = {}): Promise<SignedReadUrl> {
     const signed = await this.#client.json(signedUrlSchema, `/v1/files/${await this.#wire(path)}/signed-url`, this.#client.jsonInit("POST", {
-      expires_in: options.expiresIn ?? "1h",
+      expires_in: wireDuration(options.expiresIn ?? "1h", "expiresIn", 1),
       download_as: options.downloadAs,
       content_type: options.contentType,
     }));
@@ -472,22 +643,29 @@ export class Bucket {
 
   async signedUploadUrl(path: string, options: SignedUploadUrlOptions = {}): Promise<SignedUploadUrl> {
     const size = options.size === undefined ? undefined : parseSize(options.size, "size");
+    const visibility = (await this.#projectSettings()).default_visibility === "private" ? "private" : "public";
+    const headers: Record<string, string> = {
+      "content-type": options.contentType ?? "application/octet-stream",
+      "cache-control": cacheControl(options.cache ?? this.#defaultCache, visibility),
+    };
+    if (size !== undefined) headers["content-length"] = String(size);
     const session = await this.#client.json(uploadSessionSchema, `/v1/files/${await this.#wire(path)}/upload-url`, this.#client.jsonInit("POST", {
       size_bytes: size,
       if_exists: options.allowOverwrite === false ? "error" : "replace",
-      content_type: options.contentType,
-      cache: options.cache ?? this.#defaultCache,
+      content_type: headers["content-type"],
+      cache: headers["cache-control"],
       metadata: options.metadata,
+      expires_in: options.expiresIn === undefined ? undefined : wireDuration(options.expiresIn, "expiresIn", 1),
     }));
     if (!session.upload_url) throw new BlobError("request_failed", { message: "Direct upload is unavailable right now. Retry, or use put().", status: 503, retryable: true });
     return {
       url: session.upload_url,
-      headers: size === undefined ? {} : { "content-length": String(size) },
+      headers,
       expiresAt: new Date(session.upload_url_expires_at ?? session.expires_at ?? Date.now()),
     };
   }
 
-  async listMultipartUploads(options: { prefix?: string } = {}): Promise<MultipartUpload[]> {
+  async listMultipartUploads(options: ListMultipartOptions = {}): Promise<MultipartUpload[]> {
     const query = options.prefix ? `?prefix=${encodeURIComponent(await this.#wire(options.prefix))}` : "";
     const open = await this.#client.json(openUploadsSchema, `/v1/uploads${query}`);
     return Promise.all(open.items.map(async (item) => ({ path: await this.#relative(item.path), uploadId: item.id, initiatedAt: new Date(item.created_at) })));
@@ -499,7 +677,7 @@ export class Bucket {
 
   async abortStaleMultipartUploads(options: AbortStaleMultipartOptions): Promise<MultipartUpload[]> {
     const aborted = await this.#client.json(openUploadsSchema, "/v1/uploads/abort-stale", this.#client.jsonInit("POST", {
-      older_than: options.olderThan,
+      older_than: wireDuration(options.olderThan, "olderThan"),
       ...(options.prefix ? { prefix: await this.#wire(options.prefix) } : {}),
     }));
     return Promise.all(aborted.items.map(async (item) => ({ path: await this.#relative(item.path), uploadId: item.id, initiatedAt: new Date(item.created_at) })));
@@ -513,7 +691,7 @@ export class Bucket {
     const fresh = (): Promise<{ credentials: S3Credentials; endpoint: string }> => {
       if (current && expiresAt - Date.now() >= REFRESH_MARGIN_MS) return current;
       expiresAt = Number.POSITIVE_INFINITY;
-      current = this.#client.json(s3CredentialsSchema, "/v1/credentials", this.#client.jsonInit("POST", { expires_in: "1h" })).then((minted) => {
+      current = this.#client.json(s3CredentialsSchema, "/v1/credentials", this.#client.jsonInit("POST", { expires_in: "3600s" })).then((minted) => {
         const credentials = {
           accessKeyId: minted.access_key_id,
           secretAccessKey: minted.secret_access_key,
@@ -544,7 +722,7 @@ export class Bucket {
       ...(options.prefix === undefined ? {} : { prefix: await this.#wire(options.prefix) }),
       max_size: options.maxSize === undefined ? undefined : parseSize(options.maxSize, "maxSize"),
       content_types: options.contentTypes,
-      expires_in: options.expiresIn,
+      expires_in: options.expiresIn === undefined ? undefined : wireDuration(options.expiresIn, "expiresIn", 1),
       callback_url: options.callbackUrl,
     }));
     return {

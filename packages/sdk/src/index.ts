@@ -9,6 +9,7 @@ export type {
   CopyOptions,
   DeleteTarget,
   FromEnvOptions,
+  ListMultipartOptions,
   ListOptions,
   ListPage,
   MultipartOption,

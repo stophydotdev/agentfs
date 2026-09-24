@@ -55,31 +55,168 @@ const FROM_API: Record<string, BlobErrorCode> = {
   NoSuchUpload: "not_found",
 };
 
+export const STATUS: Record<BlobErrorCode, number> = {
+  not_found: 404,
+  already_exists: 409,
+  conflict: 409,
+  content_type_not_allowed: 400,
+  invalid_input: 400,
+  too_large: 413,
+  empty_body: 400,
+  length_required: 411,
+  signature_mismatch: 403,
+  unauthorized: 401,
+  forbidden: 403,
+  rate_limited: 429,
+  mint_backoff: 429,
+  not_ready: 503,
+  partial_delete: 500,
+  move_left_a_copy: 500,
+  invalid_content_type_pattern: 500,
+  request_failed: 500,
+};
+
+const DEFAULT_MESSAGE: Record<BlobErrorCode, string> = {
+  not_found: "not found",
+  already_exists: "already exists",
+  conflict: "the object changed since it was read",
+  content_type_not_allowed: "content type not allowed",
+  invalid_input: "invalid input",
+  too_large: "too large",
+  empty_body: "empty body",
+  length_required: "length required",
+  signature_mismatch: "signature mismatch",
+  unauthorized: "unauthorized",
+  forbidden: "forbidden",
+  rate_limited: "rate limited",
+  mint_backoff: "the credential service asked for a backoff longer than a request can wait",
+  not_ready: "not ready",
+  partial_delete: "some paths were not deleted",
+  move_left_a_copy: "move left a copy at the source",
+  invalid_content_type_pattern: "invalid content type pattern",
+  request_failed: "request failed",
+};
+
+const DEFAULT_HINT: Partial<Record<BlobErrorCode, string>> = {
+  signature_mismatch: "a 403 from storage usually means the body length or type differs from the signature",
+  length_required: "pass { size } or { maxSize } so the length is known before the first byte",
+};
+
+const CODE_FOR_STATUS: Partial<Record<number, BlobErrorCode>> = {
+  401: "unauthorized",
+  403: "forbidden",
+  404: "not_found",
+  409: "conflict",
+  411: "length_required",
+  413: "too_large",
+  429: "rate_limited",
+};
+
 export interface BlobErrorOptions {
   readonly message?: string;
+  readonly hint?: string;
   readonly status?: number;
+  readonly failed?: string[];
+  readonly etag?: string;
+  readonly size?: number;
+  readonly retryAfter?: number;
+  readonly cause?: unknown;
   readonly apiCode?: string;
   readonly retryable?: boolean;
-  readonly retryAfterSeconds?: number;
 }
+
+export interface BlobErrorJSON {
+  code: BlobErrorCode;
+  message: string;
+  status: number;
+  hint?: string;
+  failed?: string[];
+  etag?: string;
+  size?: number;
+  retryAfter?: number;
+}
+
+const MARK = Symbol.for("@agentfs/sdk/BlobError");
+const OPENS_WITH_IDENTIFIER = /^[a-z][\w+*-]*[./][\w.+*/-]*/;
+
+const sentenceCase = (message: string): string =>
+  OPENS_WITH_IDENTIFIER.test(message) ? message : message.charAt(0).toUpperCase() + message.slice(1);
+
+const isCode = (value: unknown): value is BlobErrorCode => typeof value === "string" && value in STATUS;
 
 export class BlobError extends Error {
   override readonly name = "BlobError";
+  readonly code: BlobErrorCode;
   readonly status: number;
+  readonly hint: string | undefined;
+  readonly failed: string[] | undefined;
+  readonly etag: string | undefined;
+  readonly size: number | undefined;
+  readonly retryAfter: number | undefined;
   readonly apiCode: string | undefined;
   readonly retryable: boolean;
-  readonly retryAfterSeconds: number | undefined;
+  readonly [MARK] = true;
 
-  constructor(readonly code: BlobErrorCode, options: BlobErrorOptions = {}) {
-    super(options.message ?? code.replaceAll("_", " "));
-    this.status = options.status ?? 400;
-    this.apiCode = options.apiCode;
-    this.retryable = options.retryable ?? false;
-    this.retryAfterSeconds = options.retryAfterSeconds;
+  constructor(code: BlobErrorCode, options: BlobErrorOptions | string = {}) {
+    const resolved: BlobErrorOptions = typeof options === "string" ? { message: options } : options;
+    const raw = resolved.message ?? DEFAULT_MESSAGE[code];
+    const hint = resolved.hint ?? DEFAULT_HINT[code];
+    const base = sentenceCase(raw);
+    super(hint && !raw.includes(hint) ? `${base} (${hint})` : base, resolved.cause === undefined ? undefined : { cause: resolved.cause });
+    this.code = code;
+    this.status = resolved.status ?? STATUS[code];
+    this.hint = hint;
+    this.failed = resolved.failed;
+    this.etag = resolved.etag;
+    this.size = resolved.size;
+    this.retryAfter = resolved.retryAfter;
+    this.apiCode = resolved.apiCode;
+    this.retryable = resolved.retryable ?? false;
+  }
+
+  static fromStatus(status: number, options: BlobErrorOptions = {}): BlobError {
+    return new BlobError(CODE_FOR_STATUS[status] ?? "request_failed", { ...options, status });
   }
 
   static is(error: unknown): error is BlobError {
-    return error instanceof BlobError;
+    return typeof error === "object" && error !== null && MARK in error;
+  }
+
+  toJSON(): BlobErrorJSON {
+    const json: BlobErrorJSON = { code: this.code, message: this.message, status: this.status };
+    if (this.hint) json.hint = this.hint;
+    if (this.failed) json.failed = this.failed;
+    if (this.etag) json.etag = this.etag;
+    if (this.size !== undefined) json.size = this.size;
+    if (this.retryAfter !== undefined) json.retryAfter = this.retryAfter;
+    return json;
+  }
+
+  static fromJSON(body: unknown, status?: number): BlobError | undefined {
+    if (typeof body !== "object" || body === null || !("code" in body) || !isCode(body.code)) return undefined;
+    const field = <T>(key: string, check: (value: unknown) => value is T): T | undefined => {
+      const value: unknown = (body as Record<string, unknown>)[key];
+      return check(value) ? value : undefined;
+    };
+    const isString = (value: unknown): value is string => typeof value === "string";
+    const isNumber = (value: unknown): value is number => typeof value === "number";
+    const isStrings = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString);
+    const options: { -readonly [K in keyof BlobErrorOptions]: BlobErrorOptions[K] } = {};
+    const message = field("message", isString);
+    const hint = field("hint", isString);
+    const failed = field("failed", isStrings);
+    const etag = field("etag", isString);
+    const size = field("size", isNumber);
+    const retryAfter = field("retryAfter", isNumber);
+    const statusValue = status ?? field("status", isNumber);
+    if (message !== undefined) options.message = message;
+    if (hint !== undefined) options.hint = hint;
+    if (failed !== undefined) options.failed = failed;
+    if (etag !== undefined) options.etag = etag;
+    if (size !== undefined) options.size = size;
+    if (retryAfter !== undefined) options.retryAfter = retryAfter;
+    if (statusValue !== undefined) options.status = statusValue;
+    return new BlobError(body.code, options);
   }
 }
 
@@ -109,12 +246,12 @@ export const errorFromResponse = async (response: Response, fallback: string): P
   const code = known ?? (response.status === 404 ? "not_found" : "request_failed");
   const message = (problem.success && problem.data.detail) || /<Message>([^<]*)<\/Message>/.exec(text)?.[1] || fallback;
   const retryable = problem.success && problem.data.retryable !== undefined ? problem.data.retryable : retryableStatus(response.status);
-  const retryAfterSeconds = parseRetryAfter(response.headers.get("retry-after"));
+  const retryAfter = parseRetryAfter(response.headers.get("retry-after"));
   return new BlobError(code, {
     message,
     status: response.status,
     retryable,
     ...(apiCode === undefined ? {} : { apiCode }),
-    ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+    ...(retryAfter === undefined ? {} : { retryAfter }),
   });
 };
