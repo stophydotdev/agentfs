@@ -1,4 +1,4 @@
-import { createClient, encodePath, type Client, type Source, type WriteOptions } from "./client";
+import { checkPath, createClient, encodePath, type Client, type Source, type WriteOptions } from "./client";
 import { BlobError } from "./errors";
 import { checkMetadata } from "./metadata";
 import type { RetryPolicy } from "./retry";
@@ -288,6 +288,7 @@ export interface BucketInternals {
   readonly token: string;
   readonly baseUrl: string;
   readonly wire: (path: string) => Promise<string>;
+  readonly project: () => Promise<string>;
   readonly completed: (file: StoredFile) => Promise<CompletedBlob>;
 }
 
@@ -317,6 +318,7 @@ export class Bucket {
       token: options.token,
       baseUrl: (options.baseUrl ?? "https://agentfs.cloud").replace(/\/+$/, ""),
       wire: (path) => this.#wire(path),
+      project: () => this.#full(""),
       completed: async (file) => ({ ...(await this.#object(file)), contentType: file.content_type }),
     });
   }
@@ -333,11 +335,11 @@ export class Bucket {
 
   async #full(path: string): Promise<string> {
     this.#project ??= this.#client.json(accountSchema, "/v1/me").then((me) => me.default_project ?? "default");
-    return `${await this.#project}/${path.replace(/^\/+/, "")}`;
+    return `${await this.#project}/${path}`;
   }
 
   async #wire(path: string): Promise<string> {
-    return encodePath(await this.#full(path));
+    return encodePath(await this.#full(checkPath(path)));
   }
 
   #projectSettings(): Promise<ProjectSettings> {
@@ -366,6 +368,7 @@ export class Bucket {
   }
 
   async put(path: string, body: PutBody, options: PutOptions = {}): Promise<CompletedBlob> {
+    checkPath(path);
     const allowed = options.contentTypes === undefined ? undefined : expandContentTypes(options.contentTypes);
     const maxSize = options.maxSize === undefined ? undefined : parseSize(options.maxSize, "maxSize");
     const resolved = resolveBody(body);
@@ -636,7 +639,7 @@ export class Bucket {
   async publicUrl(path: string): Promise<string | undefined> {
     const settings = await this.#projectSettings();
     if (settings.default_visibility === "private") return undefined;
-    const base = ACTIVE_EXTENSIONS.test(path) ? settings.urls.sandbox : settings.urls.files;
+    const base = ACTIVE_EXTENSIONS.test(checkPath(path)) ? settings.urls.sandbox : settings.urls.files;
     return `${base}${encodePath(path)}`;
   }
 
