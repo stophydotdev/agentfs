@@ -38,6 +38,7 @@ export interface BucketOptions {
   readonly fetch?: typeof fetch;
   readonly retry?: Partial<RetryPolicy>;
   readonly concurrency?: number;
+  readonly enableTelemetry?: boolean;
 }
 
 export type FromEnvOptions = Omit<BucketOptions, "token">;
@@ -156,7 +157,7 @@ export interface S3Config {
   credentials: () => Promise<S3Credentials>;
 }
 
-const REFRESH_MARGIN_MS = 5 * 60 * 1000;
+const REFRESH_MARGIN_MS = 30_000;
 
 export type DeleteTarget = string | string[] | { prefix: string; all?: boolean };
 

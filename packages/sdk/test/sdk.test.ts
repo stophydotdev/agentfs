@@ -237,7 +237,7 @@ test("s3() hands the AWS SDK an endpoint and refreshing credentials", async () =
     minted += 1;
     return Response.json({
       access_key_id: `AFS${minted}`, secret_access_key: "secret", session_token: "afss_token",
-      expiration: new Date(Date.now() + (minted === 1 ? 60_000 : 3_600_000)).toISOString(),
+      expiration: new Date(Date.now() + (minted === 1 ? 20_000 : 3_600_000)).toISOString(),
       endpoint: "https://agentfs.cloud/s3", region: "auto",
     }, { status: 201 });
   });
