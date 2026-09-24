@@ -1,5 +1,6 @@
 import { createClient, encodePath, type Client, type Source, type WriteOptions } from "./client";
 import { BlobError } from "./errors";
+import { checkMetadata } from "./metadata";
 import type { RetryPolicy } from "./retry";
 import {
   accountSchema,
@@ -406,10 +407,11 @@ export class Bucket {
       throw new BlobError("invalid_input", { message: "multipart: allowOverwrite: false and ifUnchanged are single-PUT only" });
     }
     const cache = options.cache ?? this.#defaultCache;
+    const metadata = checkMetadata(options.metadata);
     const write: WriteOptions = {
       contentType,
       ...(cache === undefined ? {} : { cache: wireCache(cache) }),
-      ...(options.metadata ? { metadata: options.metadata } : {}),
+      ...(metadata ? { metadata } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),
     };
@@ -461,6 +463,12 @@ export class Bucket {
   }
 
   async info(path: string): Promise<BlobInfo> {
+    return this.#infoOf(path).catch((error: unknown) => {
+      throw BlobError.is(error) && error.code === "not_found" ? new BlobError("not_found", { message: `${path} not found` }) : error;
+    });
+  }
+
+  async #infoOf(path: string): Promise<BlobInfo> {
     return this.#info(await this.#client.json(fileSchema, `/v1/files/${await this.#wire(path)}?info`));
   }
 
@@ -508,7 +516,7 @@ export class Bucket {
       if_exists: "replace",
       content_type: options.contentType,
       cache: options.cache === undefined ? undefined : wireCache(options.cache),
-      metadata: options.metadata,
+      metadata: checkMetadata(options.metadata),
     }));
     return this.#object(copied);
   }
@@ -654,7 +662,7 @@ export class Bucket {
       if_exists: options.allowOverwrite === false ? "error" : "replace",
       content_type: headers["content-type"],
       cache: headers["cache-control"],
-      metadata: options.metadata,
+      metadata: checkMetadata(options.metadata),
       expires_in: options.expiresIn === undefined ? undefined : wireDuration(options.expiresIn, "expiresIn", 1),
     }));
     if (!session.upload_url) throw new BlobError("request_failed", { message: "Direct upload is unavailable right now. Retry, or use put().", status: 503, retryable: true });

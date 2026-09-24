@@ -47,7 +47,7 @@ const FROM_API: Record<string, BlobErrorCode> = {
   object_not_ready: "not_ready",
   upload_not_active: "not_ready",
   upload_still_completing: "not_ready",
-  upload_unavailable: "mint_backoff",
+  upload_unavailable: "not_ready",
   empty_body: "empty_body",
   SignatureDoesNotMatch: "signature_mismatch",
   AccessDenied: "forbidden",
@@ -98,7 +98,7 @@ const DEFAULT_MESSAGE: Record<BlobErrorCode, string> = {
 };
 
 const DEFAULT_HINT: Partial<Record<BlobErrorCode, string>> = {
-  signature_mismatch: "a 403 from storage usually means the body length or type differs from the signature",
+  signature_mismatch: "a 403 from R2 usually means the body length or type differs from the signature",
   length_required: "pass { size } or { maxSize } so the length is known before the first byte",
 };
 
@@ -238,18 +238,29 @@ const parseJson = (text: string): unknown => {
   }
 };
 
+const STATUS_FALLBACK: Partial<Record<number, BlobErrorCode>> = {
+  401: "unauthorized",
+  404: "not_found",
+  412: "conflict",
+  413: "too_large",
+  429: "rate_limited",
+  503: "not_ready",
+};
+
+const KEEPS_DETAIL = new Set<BlobErrorCode>(["invalid_input", "forbidden", "content_type_not_allowed", "already_exists", "request_failed"]);
+
 export const errorFromResponse = async (response: Response, fallback: string): Promise<BlobError> => {
   const text = await response.text().catch(() => "");
   const problem = problemSchema.safeParse(parseJson(text));
   const apiCode = problem.success ? problem.data.code ?? problem.data.title : /<Code>([^<]*)<\/Code>/.exec(text)?.[1];
   const known = apiCode === undefined ? undefined : FROM_API[apiCode];
-  const code = known ?? (response.status === 404 ? "not_found" : "request_failed");
-  const message = (problem.success && problem.data.detail) || /<Message>([^<]*)<\/Message>/.exec(text)?.[1] || fallback;
+  const code = known ?? STATUS_FALLBACK[response.status] ?? "request_failed";
+  const detail = (problem.success && problem.data.detail) || /<Message>([^<]*)<\/Message>/.exec(text)?.[1] || fallback;
   const retryable = problem.success && problem.data.retryable !== undefined ? problem.data.retryable : retryableStatus(response.status);
   const retryAfter = parseRetryAfter(response.headers.get("retry-after"));
   return new BlobError(code, {
-    message,
-    status: response.status,
+    ...(KEEPS_DETAIL.has(code) ? { message: code === "request_failed" ? `request failed with ${response.status}: ${detail}` : detail } : {}),
+    ...(code === "request_failed" ? { status: response.status >= 500 ? 502 : response.status } : {}),
     retryable,
     ...(apiCode === undefined ? {} : { apiCode }),
     ...(retryAfter === undefined ? {} : { retryAfter }),

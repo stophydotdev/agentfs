@@ -94,9 +94,12 @@ export const checkContentType = (declared: string, head: Uint8Array | undefined,
   const bare = declared.split(";", 1)[0]?.trim().toLowerCase() ?? "";
   const wanted = canonical(bare);
   if (!allowed.includes(wanted)) {
-    throw new BlobError("content_type_not_allowed", { message: `${bare} is not allowed (allowed: ${allowed.join(", ")})`, status: 415 });
+    throw new BlobError("content_type_not_allowed", { message: `${bare} is not allowed`, hint: `allowed: ${allowed.join(", ")}` });
   }
   const seen = head ? sniff(head) : undefined;
   if (seen === undefined || seen === wanted || !CERTAIN.has(wanted)) return;
-  throw new BlobError("content_type_not_allowed", { message: `The bytes are ${seen}, which cannot be served as ${bare}`, status: 415 });
+  throw new BlobError("content_type_not_allowed", {
+    message: `the bytes are ${seen}, which cannot be served as ${bare}`,
+    hint: "declare the type the bytes actually are, or add it to contentTypes",
+  });
 };
