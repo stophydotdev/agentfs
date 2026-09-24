@@ -44,3 +44,18 @@ test("metadata is checked like Upstash before any request, and keys go lowercase
   expect(sent).toEqual([]);
   expect(checkMetadata({ Owner: "u7" })).toEqual({ owner: "u7" });
 });
+
+test("paths are checked like Upstash and sent exactly as given", async () => {
+  const urls: string[] = [];
+  const fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    urls.push(new URL(request.url).pathname);
+    return request.url.endsWith("/v1/me") ? Response.json({ default_project: "site" }) : problem(404, "file_not_found");
+  }, { preconnect: () => undefined });
+  const bucket = new Bucket({ token: "afs_key", fetch });
+  await expect(bucket.put("", "x")).rejects.toThrow(new TypeError("path must be a non-empty string"));
+  await expect(bucket.put("a/./b.txt", "x")).rejects.toThrow(TypeError);
+  await expect(bucket.info("../x.txt")).rejects.toThrow(TypeError);
+  await bucket.exists("/lead//b.txt/");
+  expect(urls.at(-1)).toBe("/v1/files/site//lead//b.txt/");
+});

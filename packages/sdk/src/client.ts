@@ -39,7 +39,13 @@ export interface SessionOptions {
 type Init = RequestInit & { readonly headers?: Record<string, string> };
 type Bytes = Blob | Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array>;
 
-export const encodePath = (path: string): string => path.split("/").filter(Boolean).map(encodeURIComponent).join("/");
+export const encodePath = (path: string): string => path.split("/").map(encodeURIComponent).join("/");
+
+export const checkPath = (path: string): string => {
+  if (typeof path !== "string" || path.length === 0) throw new TypeError("path must be a non-empty string");
+  if (path.split("/").some((segment) => segment === "." || segment === "..")) throw new TypeError(`path may not contain "." or ".." segments: ${path}`);
+  return path;
+};
 
 const bodyInit = (body: Bytes): RequestInit => {
   if (!(body instanceof ReadableStream)) return { body };

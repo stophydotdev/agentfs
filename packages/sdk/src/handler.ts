@@ -414,7 +414,7 @@ export const uploadHandler = <
     table.set(name, mount(name, BUILT in route ? route[BUILT] : route));
   }
 
-  const bucketId = (bucket: Bucket): Promise<string> => internalsOf(bucket).wire("");
+  const bucketId = (bucket: Bucket): Promise<string> => internalsOf(bucket).project();
 
   const notFound = (request: Request, name: string): Promise<Response> => {
     const onError = defaults.onError;
