@@ -1,5 +1,6 @@
 import { Bucket, internalsOf, type CompletedBlob, type MultipartOption } from "./bucket";
 import { BlobError } from "./errors";
+import { checkMetadata } from "./metadata";
 import { partUrlsSchema, uploadSessionSchema, uploadTokenSchema } from "./schemas";
 import { checkContentType, expandContentTypes, SNIFF_BYTES } from "./sniff";
 import { formatBytes, parseSize, wireCache, type CacheOption, type Size } from "./units";
@@ -330,7 +331,8 @@ const validateInput = async (schema: StandardSchema | undefined, value: unknown)
 const decide = async (route: Mounted, args: BeforeUploadArgs<unknown, unknown>): Promise<BeforeUploadResult<unknown>> => {
   const decided = route.onBeforeUpload ? await route.onBeforeUpload(args) : undefined;
   if (!decided || typeof decided.path !== "string") throw new TypeError("onBeforeUpload must return { path }");
-  return decided;
+  const metadata = checkMetadata(decided.metadata);
+  return metadata ? { ...decided, metadata } : decided;
 };
 
 const mismatched = (error: unknown, size: number): unknown =>
