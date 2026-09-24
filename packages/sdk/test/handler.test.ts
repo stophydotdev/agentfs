@@ -87,7 +87,7 @@ test("a large file goes up in parallel parts and a refused file never reaches st
   expect(io.storage).toHaveLength(2);
 
   const constraints = await (await globalThis.fetch("https://app.test/api/upload")).json();
-  expect(constraints).toEqual({ constraints: { maxSize: 10 }, proxy: false });
+  expect(constraints).toEqual({ constraints: { maxSize: 10 } });
 });
 
 test("a proxied route streams the file through your server into put()", async () => {
@@ -103,5 +103,5 @@ test("a proxied route streams the file through your server into put()", async ()
   }, handler);
   const done = await uploadThroughServer(new File(["png"], "me.png", { type: "image/png" }), { route: "https://app.test/api/upload?route=avatar" }).done;
   expect(done).toMatchObject({ path: "avatars/me.png", data: { ok: 1 } });
-  expect(io.api).toEqual(["PUT /v1/files/site/avatars/me.png"]);
+  expect(io.api.map((call) => call.split("?")[0])).toEqual(["PUT /v1/files/site/avatars/me.png"]);
 });

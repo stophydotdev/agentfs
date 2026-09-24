@@ -1,4 +1,4 @@
-import type { BlobError } from "./errors";
+import type { BlobError, BlobErrorJSON } from "./errors";
 
 export interface UploadFile {
   name: string;
@@ -59,7 +59,10 @@ export interface WireEndResponse<TData = unknown> {
 
 export interface WireConstraintsResponse {
   constraints: ServedConstraints;
-  proxy: boolean;
+}
+
+export interface WireCancelResponse {
+  ok: true;
 }
 
 export type WireRequest =
@@ -68,9 +71,7 @@ export type WireRequest =
   | { phase: "end"; completionToken: string; parts?: WireLanded[] }
   | { phase: "cancel"; completionToken: string };
 
-export interface WireError {
-  error: { code: string; message: string; status: number };
-}
+export type WireError = BlobErrorJSON;
 
 export interface UploadedBlob {
   path: string;

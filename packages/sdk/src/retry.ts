@@ -42,7 +42,7 @@ export const withRetry = async <T>(task: () => Promise<T>, policy: RetryPolicy, 
       else throw error;
       if (httpFailures >= policy.httpAttempts || networkFailures >= policy.networkAttempts) throw error;
       const ceiling = Math.min(policy.maxDelayMs, policy.baseDelayMs * 2 ** (httpFailures + networkFailures - 1));
-      const retryAfter = error instanceof BlobError ? error.retryAfterSeconds : undefined;
+      const retryAfter = error instanceof BlobError ? error.retryAfter : undefined;
       await policy.sleep(retryAfter === undefined ? policy.random() * ceiling : retryAfter * 1000);
     }
   }

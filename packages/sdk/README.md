@@ -97,12 +97,14 @@ Files over 16 MB go up in parallel parts with retries, pause and resume, and pic
 import { uploadHooks } from "@agentfs/sdk/react";
 import type { uploads } from "./api/upload/route";
 
-export const { useUpload, useServerUpload } = uploadHooks<typeof uploads>();
+export const { useUpload } = uploadHooks<typeof uploads>();
 
 const avatar = useUpload();
-// <input type="file" accept={avatar.accept} onChange={(e) => avatar.start(e.target.files![0])} />
-// avatar.upload?.status, .percent, .blob?.data, .error, .pause(), .resume(), .cancel()
+// <input type="file" accept={avatar.accept} onChange={(e) => avatar.start({ file: e.target.files![0] })} />
+// avatar.upload?.status, .percent, .stalled, .blob?.data, .error, .pause(), .resume(), .cancel(), .retry()
 ```
+
+`start({ files })` queues several at once; three upload at a time by default (`concurrency`). Files over the route's `maxSize` or outside its `contentTypes` fail before any request. `useServerUpload(url)` posts the file as FormData to a route of your own and reports progress.
 
 Route names and completion data are checked at compile time. Uploads from other sites must come from an origin in the project's allowed origins.
 

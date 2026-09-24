@@ -51,13 +51,16 @@ test("put writes one PUT to the bucket path and returns the blob", async () => {
 });
 
 test("allowOverwrite: false and ifUnchanged become conditional headers and typed errors", async () => {
-  const api = fakeApi((call) => (call.headers.get("if-none-match") ? problem(409, "path_exists") : problem(412, "precondition_failed")));
+  const api = fakeApi((call) => {
+    if (call.method === "HEAD") return new Response(null, { headers: { etag: '"there"', "content-length": "42" } });
+    return call.headers.get("if-none-match") ? problem(409, "path_exists") : problem(412, "precondition_failed");
+  });
   const bucket = new Bucket({ token: "afs_key", bucket: "site", fetch: api.fetch, retry: noWait });
   const exists = await bucket.put("a.txt", "x", { allowOverwrite: false }).catch((error: unknown) => error);
-  expect(BlobError.is(exists) && exists.code).toBe("already_exists");
+  expect(exists).toMatchObject({ code: "already_exists", message: "a.txt already exists", etag: '"there"', size: 42 });
   const changed = await bucket.put("a.txt", "x", { ifUnchanged: '"old"' }).catch((error: unknown) => error);
   expect(BlobError.is(changed) && changed.code).toBe("conflict");
-  expect(api.calls[1]?.headers.get("if-match")).toBe('"old"');
+  expect(api.calls.at(-1)?.headers.get("if-match")).toBe('"old"');
 });
 
 test("maxSize and contentTypes are checked before anything is sent", async () => {
@@ -151,7 +154,7 @@ test("signedReadUrl passes downloadAs and returns a Date", async () => {
   const signed = await bucket.signedReadUrl("q3.pdf", { expiresIn: "2m", downloadAs: "Q3.pdf" });
   expect(signed.expiresAt.toISOString()).toBe("2026-09-24T02:00:00.000Z");
   expect(api.calls[0]?.url.pathname).toBe("/v1/files/site/q3.pdf/signed-url");
-  expect(JSON.parse(String(api.calls[0]?.body))).toEqual({ expires_in: "2m", download_as: "Q3.pdf" });
+  expect(JSON.parse(String(api.calls[0]?.body))).toEqual({ expires_in: "120s", download_as: "Q3.pdf" });
 });
 
 test("verifyUploadCallback accepts AgentFS's signature and rejects a tampered body", async () => {
@@ -213,14 +216,19 @@ test("large overwrites and upload URLs replace atomically", async () => {
     if (call.url.pathname === "/v1/uploads") return Response.json({ id: "up_2", status: "active", transport: "s3", part_size: 8, total_parts: 1, upload_url: "https://r2.test/put", uploaded_parts: [] }, { status: 201 });
     if (call.url.hostname === "r2.test") return new Response(null, { status: 200 });
     if (call.url.pathname.endsWith("/complete")) return Response.json(file("site/big.bin"));
+    if (call.url.pathname === "/v1/projects/site") return Response.json({ id: "p_1", default_visibility: "private", urls: { files: "https://f.test/", sandbox: "https://s.test/" } });
     return Response.json({ id: "up_3", status: "active", transport: "s3", part_size: 0, total_parts: 1, upload_url: "https://r2.test/put2", upload_url_expires_at: "2026-09-24T02:00:00.000Z", uploaded_parts: [] }, { status: 201 });
   });
   const bucket = new Bucket({ token: "afs_key", bucket: "site", fetch: api.fetch });
   await bucket.put("big.bin", "12345678", { multipart: true });
   expect(JSON.parse(String(api.calls[0]?.body))).toMatchObject({ if_exists: "replace" });
   const upload = await bucket.signedUploadUrl("scan.pdf");
-  expect(upload).toEqual({ url: "https://r2.test/put2", headers: {}, expiresAt: new Date("2026-09-24T02:00:00.000Z") });
-  expect(JSON.parse(String(api.calls.at(-1)?.body))).toEqual({ if_exists: "replace" });
+  expect(upload).toEqual({
+    url: "https://r2.test/put2",
+    headers: { "content-type": "application/octet-stream", "cache-control": "private, max-age=3600" },
+    expiresAt: new Date("2026-09-24T02:00:00.000Z"),
+  });
+  expect(JSON.parse(String(api.calls.at(-1)?.body))).toEqual({ if_exists: "replace", content_type: "application/octet-stream", cache: "private, max-age=3600" });
 });
 
 test("s3() hands the AWS SDK an endpoint and refreshing credentials", async () => {
