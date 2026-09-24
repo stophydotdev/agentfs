@@ -49,6 +49,12 @@ export const openUploadsSchema = z.object({
 
 export const deletedSchema = z.object({ deleted: z.number(), has_more: z.boolean() });
 
+export const projectSettingsSchema = z.object({
+  id: z.string(),
+  default_visibility: z.enum(["public", "unlisted", "private"]),
+  urls: z.object({ files: z.string(), sandbox: z.string() }),
+});
+
 export const accountSchema = z.object({
   default_project: z.string().optional(),
 });
@@ -68,4 +74,5 @@ export const problemSchema = z.object({
 });
 
 export type StoredFile = z.infer<typeof fileSchema>;
+export type ProjectSettings = z.infer<typeof projectSettingsSchema>;
 export type UploadSession = z.infer<typeof uploadSessionSchema>;

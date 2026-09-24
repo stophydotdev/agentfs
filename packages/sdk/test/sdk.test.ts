@@ -108,7 +108,7 @@ test("list matches a raw prefix and pages with a cursor", async () => {
   expect(page.blobs.map((blob) => blob.path)).toEqual(["avatars/me.png"]);
   expect(page.cursor).toBe("c2");
   expect(api.calls[0]?.url.searchParams.get("starts_with")).toBe("site/ava");
-  expect(api.calls[0]?.url.searchParams.get("limit")).toBe("200");
+  expect(api.calls[0]?.url.searchParams.get("limit")).toBe("1000");
 });
 
 test("exists is a HEAD, del takes a path, a list or a prefix", async () => {
@@ -137,8 +137,7 @@ test("updateJson retries when another writer got there first", async () => {
       puts += 1;
       return puts === 1 ? problem(412, "precondition_failed") : Response.json(file("site/count.json"));
     }
-    if (call.url.search === "?info") return Response.json(file("site/count.json", { etag: `"e${puts}"` }));
-    return new Response(JSON.stringify({ n: puts }));
+    return new Response(JSON.stringify({ n: puts }), { headers: { etag: `"e${puts}"`, "content-length": "7" } });
   });
   const bucket = new Bucket({ token: "afs_key", bucket: "site", fetch: api.fetch, retry: noWait });
   await bucket.updateJson<{ n: number }>("count.json", (previous) => ({ n: (previous?.n ?? 0) + 1 }));
@@ -179,4 +178,62 @@ test("verifyUploadCallback accepts AgentFS's signature and rejects a tampered bo
   const header = `t=${timestamp},v1=${mac}`;
   expect((await verifyUploadCallback(secret, header, body))?.data.file.path).toBe("site/a.txt");
   expect(await verifyUploadCallback(secret, header, body.replace("a.txt", "b.txt"))).toBeNull();
+});
+
+test("get is one request and reads the record from the response headers", async () => {
+  const api = fakeApi(() => new Response("hello", {
+    headers: {
+      "content-type": "text/plain",
+      "content-length": "5",
+      etag: '"e9"',
+      "last-modified": "Thu, 24 Sep 2026 01:00:00 GMT",
+      "x-agentfs-path": "site/r%C3%A9sum%C3%A9.txt",
+      "x-agentfs-url": "https://f.test/p/p_1/r%C3%A9sum%C3%A9.txt",
+      "x-agentfs-meta-owner": "u7",
+    },
+  }));
+  const bucket = new Bucket({ token: "afs_key", bucket: "site", fetch: api.fetch });
+  const blob = await bucket.get("résumé.txt");
+  expect(api.calls).toHaveLength(1);
+  expect(api.calls[0]?.url.pathname).toBe("/v1/files/site/r%C3%A9sum%C3%A9.txt");
+  expect(blob).toMatchObject({ path: "résumé.txt", size: 5, etag: '"e9"', contentType: "text/plain", metadata: { owner: "u7" } });
+  expect(blob.versionedUrl).toBe("https://f.test/p/p_1/r%C3%A9sum%C3%A9.txt?v=e9");
+  expect(await new Response(blob.body).text()).toBe("hello");
+});
+
+test("publicUrl is built from the bucket, without asking for the file", async () => {
+  const api = fakeApi(() => Response.json({ id: "p_1", default_visibility: "public", urls: { files: "https://f.test/p/p_1/", sandbox: "https://s.test/p/p_1/" } }));
+  const bucket = new Bucket({ token: "afs_key", bucket: "site", fetch: api.fetch });
+  expect(await bucket.publicUrl("avatars/me.png")).toBe("https://f.test/p/p_1/avatars/me.png");
+  expect(await bucket.publicUrl("pages/index.html")).toBe("https://s.test/p/p_1/pages/index.html");
+  expect(api.calls).toHaveLength(1);
+});
+
+test("contentTypes checks the bytes, not just the label", async () => {
+  const bucket = new Bucket({ token: "afs_key", bucket: "site", fetch: fakeApi(() => Response.json({})).fetch });
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52]);
+  await expect(bucket.put("a.pdf", png, { contentType: "application/pdf", contentTypes: ["application/pdf"] })).rejects.toMatchObject({ code: "content_type_not_allowed" });
+  await expect(bucket.put("a.png", png, { contentTypes: ["images/*"] })).rejects.toMatchObject({ code: "invalid_content_type_pattern" });
+});
+
+test("a stream needs a size or maxSize, like Upstash", async () => {
+  const bucket = new Bucket({ token: "afs_key", bucket: "site", fetch: fakeApi(() => Response.json({})).fetch });
+  const stream = () => new Blob(["abc"]).stream();
+  await expect(bucket.put("a.txt", stream())).rejects.toMatchObject({ code: "length_required" });
+  await expect(bucket.put("a.txt", stream(), { maxSize: "2b" })).rejects.toMatchObject({ code: "too_large" });
+});
+
+test("large overwrites and upload URLs replace atomically", async () => {
+  const api = fakeApi((call) => {
+    if (call.url.pathname === "/v1/uploads") return Response.json({ id: "up_2", status: "active", transport: "s3", part_size: 8, total_parts: 1, upload_url: "https://r2.test/put", uploaded_parts: [] }, { status: 201 });
+    if (call.url.hostname === "r2.test") return new Response(null, { status: 200 });
+    if (call.url.pathname.endsWith("/complete")) return Response.json(file("site/big.bin"));
+    return Response.json({ id: "up_3", status: "active", transport: "s3", part_size: 0, total_parts: 1, upload_url: "https://r2.test/put2", upload_url_expires_at: "2026-09-24T02:00:00.000Z", uploaded_parts: [] }, { status: 201 });
+  });
+  const bucket = new Bucket({ token: "afs_key", bucket: "site", fetch: api.fetch });
+  await bucket.put("big.bin", "12345678", { multipart: true });
+  expect(JSON.parse(String(api.calls[0]?.body))).toMatchObject({ if_exists: "replace" });
+  const upload = await bucket.signedUploadUrl("scan.pdf");
+  expect(upload).toEqual({ url: "https://r2.test/put2", headers: {}, expiresAt: new Date("2026-09-24T02:00:00.000Z") });
+  expect(JSON.parse(String(api.calls.at(-1)?.body))).toEqual({ if_exists: "replace" });
 });
