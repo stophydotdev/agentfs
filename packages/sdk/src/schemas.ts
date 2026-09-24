@@ -67,6 +67,15 @@ export const uploadTokenSchema = z.object({
   callback_secret: z.string().nullable(),
 });
 
+export const s3CredentialsSchema = z.object({
+  access_key_id: z.string(),
+  secret_access_key: z.string(),
+  session_token: z.string(),
+  expiration: z.string(),
+  endpoint: z.string(),
+  region: z.string(),
+});
+
 export const problemSchema = z.object({
   code: z.string().optional(),
   title: z.string().optional(),
