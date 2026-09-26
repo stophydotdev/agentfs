@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { createClient as createTransfer } from "../../sdk/src/client";
+import type { RetryPolicy } from "../../sdk/src/retry";
 import pkg from "../package.json";
 
 export const fileSchema = z.object({
@@ -33,21 +35,6 @@ export const accountSchema = z.object({
   plan: z.string().nullable().optional(),
 });
 
-export const uploadSessionSchema = z.object({
-  id: z.string(),
-  status: z.string().optional(),
-  transport: z.enum(["s3", "worker"]),
-  part_size: z.number(),
-  total_parts: z.number(),
-  upload_url: z.string().optional(),
-  uploaded_parts: z.array(z.object({ part_number: z.number() })).optional(),
-  file: fileSchema.optional(),
-});
-
-const partUrlsSchema = z.object({
-  parts: z.array(z.object({ part_number: z.number(), url: z.string() })),
-});
-
 export const deviceSchema = z.object({
   device_code: z.string(),
   user_code: z.string(),
@@ -72,7 +59,6 @@ const problemSchema = z.object({
 export type StoredFile = z.infer<typeof fileSchema>;
 export type Project = z.infer<typeof projectSchema>;
 export type Account = z.infer<typeof accountSchema>;
-export type UploadSession = z.infer<typeof uploadSessionSchema>;
 export type Device = z.infer<typeof deviceSchema>;
 
 export class ApiError extends Error {
@@ -87,7 +73,7 @@ export class ApiError extends Error {
   }
 }
 
-export function retryAfterSeconds(value: string | null | undefined) {
+function retryAfterSeconds(value: string | null | undefined) {
   if (!value) return undefined;
   const seconds = Number(value);
   if (Number.isFinite(seconds)) return Math.max(0, seconds);
@@ -95,7 +81,7 @@ export function retryAfterSeconds(value: string | null | undefined) {
   return Number.isNaN(date) ? undefined : Math.max(0, (date - Date.now()) / 1000);
 }
 
-export function problemError(status: number, text: string, retryAfter: string | null | undefined, fallback: string) {
+function problemError(status: number, text: string, retryAfter: string | null | undefined, fallback: string) {
   const json = (() => {
     try {
       return JSON.parse(text) as unknown;
@@ -173,21 +159,8 @@ export function createClient({ apiKey, apiUrl }: { apiKey: string | undefined; a
     content: (id: string) => send(`/v1/files/${encodeURIComponent(id)}/content`),
     uploadForm: (form: FormData, extra: Record<string, string>) =>
       json(fileSchema, "/v1/files", { method: "POST", body: form, headers: extra }),
-    createUpload: (input: Record<string, unknown>) => json(uploadSessionSchema, "/v1/uploads", { method: "POST", ...body(input) }),
-    getUpload: (id: string) => json(uploadSessionSchema, `/v1/uploads/${encodeURIComponent(id)}`),
-    partTarget: (id: string, part: number) => ({
-      url: new URL(`/v1/uploads/${encodeURIComponent(id)}/parts/${part}`, apiUrl).href,
-      headers: headers(),
-    }),
-    partUrls: (id: string, from: number, to: number) =>
-      json(partUrlsSchema, `/v1/uploads/${encodeURIComponent(id)}/part-urls?from=${from}&to=${to}`),
-    completeUpload: async (id: string) => {
-      const response = await send(`/v1/uploads/${encodeURIComponent(id)}/complete`, { method: "POST" });
-      return response.status === 202 ? undefined : fileSchema.parse(await response.json());
-    },
-    abortUpload: async (id: string) => {
-      await send(`/v1/uploads/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => undefined);
-    },
+    transfer: (extra: Record<string, string>, tuning: { concurrency: number; retry: Partial<RetryPolicy> }) =>
+      createTransfer({ token: apiKey ?? "", baseUrl: apiUrl, headers: headers(extra), ...tuning }),
     listProjects: () => json(z.object({ items: z.array(projectSchema) }), "/v1/projects"),
     createProject: (name: string) => json(projectSchema, "/v1/projects", { method: "POST", ...body({ name }) }),
     deleteProject: async (name: string) => {

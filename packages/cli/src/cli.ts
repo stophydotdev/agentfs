@@ -5,6 +5,7 @@ import { basename, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 
+import { BlobError } from "../../sdk/src/errors";
 import pkg from "../package.json";
 import { ApiError, createClient, type Client, type StoredFile } from "./api";
 import { clearConfig, credentialsPath, DEFAULT_API_URL, insecureApiUrl, maskKey, permissions, readConfig, resolveCredentials, writeConfig } from "./config";
@@ -45,8 +46,14 @@ class UsageError extends Error {}
 
 const KEYED_UPLOAD_FLAGS = ["project", "path", "prefix", "visibility", "expires-in", "label", "replace"] as const;
 
+const errorCode = (error: unknown) => {
+  if (error instanceof ApiError) return error.code;
+  if (BlobError.is(error)) return error.apiCode ?? error.code;
+  return error instanceof UsageError ? "usage" : "error";
+};
+
 const errorInfo = (error: unknown) => ({
-  code: error instanceof ApiError ? error.code : error instanceof UsageError ? "usage" : "error",
+  code: errorCode(error),
   message: error instanceof Error ? error.message : String(error),
 });
 
@@ -459,11 +466,16 @@ const COMMANDS: Record<string, Command> = {
     async run({ args, flags, client, out }) {
       const id = required(args, 0, "file id");
       const chosen = text(flags, "output");
+      const content = client.content(id);
+      content.catch(() => undefined);
       const target = resolve(chosen ?? safeFileName((await client.getFile(id)).name));
-      if (existsSync(target) && flags.force !== true) throw new UsageError(`${target} already exists. Pass --force to overwrite it, or -o to pick another path.`);
+      if (existsSync(target) && flags.force !== true) {
+        void content.then((response) => response.body?.cancel(), () => undefined);
+        throw new UsageError(`${target} already exists. Pass --force to overwrite it, or -o to pick another path.`);
+      }
       const progress = spinner(`Downloading ${basename(target)}`);
       try {
-        const response = await client.content(id);
+        const response = await content;
         if (!response.body) throw new Error("The file has no content.");
         await pipeline(response.body, createWriteStream(target));
         progress.stop();
@@ -650,7 +662,7 @@ export async function main(argv: string[]) {
   } catch (error) {
     const { code, message } = errorInfo(error);
     if (out.json) process.stdout.write(`${JSON.stringify({ success: false, error: { code, message } }, null, 2)}\n`);
-    else process.stderr.write(`${fail(clean(message))}${error instanceof ApiError ? ` ${dim(`(${clean(error.code)})`)}` : ""}\n`);
+    else process.stderr.write(`${fail(clean(message))}${code === "usage" || code === "error" ? "" : ` ${dim(`(${clean(code)})`)}`}\n`);
     if (error instanceof UsageError && !out.json) process.stderr.write(`${dim(`Usage: ${command.usage}`)}\n`);
     return 1;
   }
