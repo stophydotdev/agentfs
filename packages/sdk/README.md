@@ -39,7 +39,7 @@ A bucket is an AgentFS project. `new Bucket({ token, bucket: "site" })` picks on
 | `ifUnchanged` | none | An etag; fails with `conflict` if the file changed |
 | `multipart` | `"16mb"` | Size above which the body goes up in parts; `true` or `false` forces it |
 
-Bodies over 16 MB go up in parts, several at a time, with retries per part. `allowOverwrite: false` and `ifUnchanged` work up to 100 MB.
+Bodies over 1 MB go straight to storage; over 16 MB they go up in parts, several at a time, with retries per part. `allowOverwrite: false` and `ifUnchanged` work up to 5 GB. A stream needs `size` or `maxSize` unless it is 1 MB or less.
 
 ```ts
 await bucket.copy("tmp/9f3c", "archive/report.pdf");

@@ -149,3 +149,17 @@ test("get follows a storage redirect without the API key and keeps the API's met
   expect(blob).toMatchObject({ path: "a.txt", size: 5, etag: '"e2"', contentType: "text/plain", metadata: { owner: "u7" } });
   expect(api.calls.map((call) => [call.url.host, call.headers.has("authorization")])).toEqual([["agentfs.cloud", true], ["storage.test", false]]);
 });
+
+test("get reads the record from info when a redirect carries no metadata", async () => {
+  const api = fakeApi((call) => {
+    if (call.url.host === "edge.test") return new Response("hello", { headers: { "content-length": "5" } });
+    if (call.url.searchParams.has("info")) {
+      return Response.json({ id: "f_1", name: "a.txt", path: "site/a.txt", content_type: "text/plain", size_bytes: 5, etag: '"e3"', visibility: "public", url: null, metadata: { owner: "u7" }, created_at: "2026-09-24T00:00:00.000Z" });
+    }
+    return new Response(null, { status: 302, headers: { location: "https://edge.test/a.txt" } });
+  });
+  const blob = await new Bucket({ token: "k", bucket: "site", fetch: api.fetch }).get("a.txt");
+  expect(blob).toMatchObject({ path: "a.txt", size: 5, etag: '"e3"', contentType: "text/plain", metadata: { owner: "u7" } });
+  expect(await new Response(blob.body).text()).toBe("hello");
+  expect(api.calls.map((call) => [call.url.host, call.headers.has("authorization")])).toEqual([["agentfs.cloud", true], ["edge.test", false], ["agentfs.cloud", true]]);
+});

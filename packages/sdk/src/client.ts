@@ -1,9 +1,10 @@
 import type { z } from "zod";
 
-import { BlobError, errorFromResponse } from "./errors";
+import { BlobError, errorFromResponse, needsDirectUpload } from "./errors";
 import { defaultRetryPolicy, ExpiredUrlError, withRetry, type RetryPolicy } from "./retry";
 import { fileSchema, partUrlsSchema, uploadSessionSchema, type StoredFile, type UploadSession } from "./schemas";
 
+export const DIRECT_THRESHOLD = 1024 * 1024;
 const PART_URL_BATCH = 100;
 const COMPLETE_POLLS = 40;
 const COMPLETE_POLL_MAX_MS = 1000;
@@ -125,14 +126,14 @@ export const createClient = (options: ClientOptions) => {
     return retried ? withRetry(attempt, policy, init.signal) : attempt();
   };
 
-  const download = async (path: string): Promise<{ readonly meta: Headers; readonly content: Response }> => {
+  const download = async (path: string): Promise<{ readonly meta: Headers; readonly content: Response; readonly redirected: boolean }> => {
     const first = await send(path, { redirect: "manual" });
     if (first.type === "opaqueredirect") {
       const followed = await send(path);
-      return { meta: followed.headers, content: followed };
+      return { meta: followed.headers, content: followed, redirected: true };
     }
     const location = first.headers.get("location");
-    if (first.status < 300 || first.status >= 400 || !location) return { meta: first.headers, content: first };
+    if (first.status < 300 || first.status >= 400 || !location) return { meta: first.headers, content: first, redirected: false };
     const target = new URL(location, `${baseUrl}${path}`);
     const headers: Record<string, string> = target.origin === new URL(baseUrl).origin ? { authorization: `Bearer ${options.token}` } : {};
     const content = await withRetry(async () => {
@@ -140,7 +141,7 @@ export const createClient = (options: ClientOptions) => {
       if (!response.ok) throw await errorFromResponse(response, `GET ${path} failed with ${response.status} at storage.`);
       return response;
     }, policy);
-    return { meta: first.headers, content };
+    return { meta: first.headers, content, redirected: true };
   };
 
   const json = async <Schema extends z.ZodType>(schema: Schema, path: string, init?: Init): Promise<z.infer<Schema>> =>
@@ -289,7 +290,21 @@ export const createClient = (options: ClientOptions) => {
     return complete(created.id, write.signal);
   };
 
-  return { send, download, json, jsonInit, putFile, upload, complete, policy };
+  const store = async (path: string, source: Source, write: WriteOptions & SessionOptions): Promise<StoredFile> => {
+    if (source.size === 0 || (!write.multipart && source.size <= DIRECT_THRESHOLD)) {
+      try {
+        return await putFile(path, source, {
+          ...write,
+          ...(write.ifExists === "error" ? { ifNoneMatch: true } : {}),
+        });
+      } catch (error) {
+        if (!(source instanceof Blob) || source.size === 0 || !needsDirectUpload(error)) throw error;
+      }
+    }
+    return upload(path, source, write);
+  };
+
+  return { send, download, json, jsonInit, putFile, upload, store, complete, policy };
 };
 
 export type Client = ReturnType<typeof createClient>;

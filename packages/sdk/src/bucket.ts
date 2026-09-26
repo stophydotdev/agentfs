@@ -1,4 +1,4 @@
-import { checkPath, createClient, encodePath, type Client, type Source, type WriteOptions } from "./client";
+import { checkPath, createClient, DIRECT_THRESHOLD, encodePath, type Client, type Source, type WriteOptions } from "./client";
 import { BlobError } from "./errors";
 import { checkMetadata } from "./metadata";
 import type { RetryPolicy } from "./retry";
@@ -19,7 +19,6 @@ import {
 import { checkContentType, expandContentTypes, SNIFF_BYTES } from "./sniff";
 import { cacheControl, formatBytes, parseSize, wireCache, wireDuration, type CacheOption, type Duration, type Size } from "./units";
 
-const ONE_REQUEST_LIMIT = 100 * 1024 * 1024;
 const MULTIPART_THRESHOLD = 16_000_000;
 const SINGLE_PUT_MAX = 5 * 1024 * 1024 * 1024;
 const LIST_LIMIT = 1000;
@@ -206,12 +205,12 @@ const concat = (chunks: readonly Uint8Array[]): Uint8Array<ArrayBuffer> => {
   return out;
 };
 
-const peek = async (stream: ReadableStream<Uint8Array>): Promise<{ head: Uint8Array; stream: ReadableStream<Uint8Array> }> => {
+const peek = async (stream: ReadableStream<Uint8Array>, bytes: number): Promise<{ head: Uint8Array<ArrayBuffer>; ended: boolean; stream: ReadableStream<Uint8Array> }> => {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let got = 0;
   let ended = false;
-  while (got < SNIFF_BYTES) {
+  while (got < bytes) {
     const { value, done } = await reader.read();
     if (done) {
       ended = true;
@@ -235,7 +234,7 @@ const peek = async (stream: ReadableStream<Uint8Array>): Promise<{ head: Uint8Ar
       return reader.cancel(reason);
     },
   });
-  return { head: buffered.subarray(0, SNIFF_BYTES), stream: replay };
+  return { head: buffered, ended, stream: replay };
 };
 
 const readAll = async (stream: ReadableStream<Uint8Array>, maxSize: number): Promise<Uint8Array<ArrayBuffer>> => {
@@ -378,10 +377,16 @@ export class Bucket {
     if ("blob" in resolved) source = resolved.blob;
     else {
       const size = resolved.size ?? (options.size === undefined ? undefined : parseSize(options.size, "size"));
-      if (size === undefined) {
-        if (maxSize === undefined) throw new BlobError("length_required");
-        source = new Blob([await readAll(resolved.stream, maxSize)]);
-      } else source = { stream: resolved.stream, size };
+      if (size !== undefined) source = { stream: resolved.stream, size };
+      else if (maxSize !== undefined) source = new Blob([await readAll(resolved.stream, maxSize)]);
+      else {
+        const peeked = await peek(resolved.stream, DIRECT_THRESHOLD + 1);
+        if (!peeked.ended) {
+          await peeked.stream.cancel().catch(() => undefined);
+          throw new BlobError("length_required");
+        }
+        source = new Blob([peeked.head]);
+      }
     }
     if (maxSize !== undefined && source.size > maxSize) {
       if (!(source instanceof Blob)) await source.stream.cancel().catch(() => undefined);
@@ -390,10 +395,10 @@ export class Bucket {
     if (allowed) {
       if (source instanceof Blob) checkContentType(contentType, new Uint8Array(await source.slice(0, SNIFF_BYTES).arrayBuffer()), allowed);
       else {
-        const peeked = await peek(source.stream);
+        const peeked = await peek(source.stream, SNIFF_BYTES);
         source = { stream: peeked.stream, size: source.size };
         try {
-          checkContentType(contentType, peeked.head, allowed);
+          checkContentType(contentType, peeked.head.subarray(0, SNIFF_BYTES), allowed);
         } catch (error) {
           await peeked.stream.cancel().catch(() => undefined);
           throw error;
@@ -440,20 +445,19 @@ export class Bucket {
   }
 
   async #write(full: string, source: Source, write: WriteOptions, options: PutOptions, conditional: boolean): Promise<StoredFile> {
-    if (source.size > 0 && wantsMultipart(options.multipart, source.size) && !conditional) {
-      return this.#client.upload(full, source, { ...write, multipart: true, ifExists: "replace" });
-    }
-    const ifMatch = options.ifUnchanged === undefined ? {} : { ifMatch: options.ifUnchanged };
-    if (source.size <= ONE_REQUEST_LIMIT) {
-      return this.#client.putFile(full, source, { ...write, ...ifMatch, ...(options.allowOverwrite === false ? { ifNoneMatch: true } : {}) });
-    }
-    if (source.size > SINGLE_PUT_MAX) {
+    const multipart = source.size > 0 && wantsMultipart(options.multipart, source.size) && !conditional;
+    if (!multipart && source.size > SINGLE_PUT_MAX) {
       throw new BlobError("too_large", {
         message: `${formatBytes(source.size)} is over the ${formatBytes(SINGLE_PUT_MAX)} a single PUT can carry`,
         hint: "allowOverwrite: false and ifUnchanged are single-PUT only",
       });
     }
-    return this.#client.upload(full, source, { ...write, ...ifMatch, multipart: false, ifExists: options.allowOverwrite === false ? "error" : "replace" });
+    return this.#client.store(full, source, {
+      ...write,
+      multipart,
+      ifExists: options.allowOverwrite === false ? "error" : "replace",
+      ...(options.ifUnchanged === undefined ? {} : { ifMatch: options.ifUnchanged }),
+    });
   }
 
   async #head(path: string): Promise<{ etag: string; size: number } | undefined> {
@@ -477,8 +481,16 @@ export class Bucket {
   }
 
   async get(path: string): Promise<BlobDownload> {
-    const { meta, content } = await this.#client.download(`/v1/files/${await this.#wire(path)}`);
+    const { meta, content, redirected } = await this.#client.download(`/v1/files/${await this.#wire(path)}`);
     if (!content.body) throw new BlobError("request_failed", { message: `${path} came back without a body`, status: 502 });
+    const stored = meta.get("x-agentfs-path");
+    if (redirected && !stored) {
+      const info = await this.#infoOf(path).catch(async (error: unknown) => {
+        await content.body?.cancel().catch(() => undefined);
+        throw error;
+      });
+      return { ...info, body: content.body };
+    }
     const header = (name: string): string | null => meta.get(name) ?? content.headers.get(name);
     const url = header("x-agentfs-url") ?? undefined;
     const etag = header("etag") ?? "";
@@ -486,7 +498,6 @@ export class Bucket {
     meta.forEach((value, name) => {
       if (name.startsWith("x-agentfs-meta-")) metadata[name.slice("x-agentfs-meta-".length)] = value;
     });
-    const stored = header("x-agentfs-path");
     return {
       path: stored ? await this.#relative(decodePath(stored)) : path,
       ...(url ? { url, versionedUrl: `${url}?v=${encodeURIComponent(etag.replaceAll('"', ""))}` } : {}),

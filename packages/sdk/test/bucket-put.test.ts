@@ -119,7 +119,7 @@ test("a stream with only maxSize is buffered up to the cap, like Upstash", async
   expect(api.calls[0]?.body).toBeInstanceOf(Blob);
   expect(api.calls[0]?.headers.get("content-length")).toBe("3");
   await expect(bucket.put("a.txt", lazyStream([bytes(3)]), { size: 3, maxSize: "2b" })).rejects.toMatchObject({ code: "too_large" });
-  await expect(bucket.put("a.txt", lazyStream([bytes(3)]))).rejects.toMatchObject({ code: "length_required", status: 411 });
+  await expect(bucket.put("a.txt", lazyStream([bytes(1024 * 1024), bytes(1)]))).rejects.toMatchObject({ code: "length_required", status: 411 });
 });
 
 test("without contentType the body's own type is sent, else octet-stream", async () => {
@@ -166,4 +166,78 @@ test("a lost conditional session reports already_exists with the object's etag a
   });
   const bucket = new Bucket({ token: "k", bucket: "site", fetch: api.fetch });
   await expect(bucket.put("a.txt", "x", { allowOverwrite: false })).rejects.toMatchObject({ code: "already_exists", etag: '"now"', size: 9 });
+});
+
+const directApi = (extra: (call: Call) => Response | undefined = () => undefined) => fakeApi(async (call) => {
+  const answered = extra(call);
+  if (answered) return answered;
+  if (call.url.hostname === "bucket.r2.test") {
+    await new Response(call.body).arrayBuffer();
+    return new Response(null);
+  }
+  if (call.url.pathname === "/v1/uploads") {
+    const size = Number(JSON.parse(String(call.body)).size_bytes);
+    if (size <= 16 * 1024 * 1024) return session({ transport: "s3", part_size: size, total_parts: 1, upload_url: "https://bucket.r2.test/whole" });
+    return session({ transport: "s3", part_size: 16 * 1024 * 1024, total_parts: Math.ceil(size / (16 * 1024 * 1024)) });
+  }
+  if (call.url.pathname === "/v1/uploads/up_1/part-urls") {
+    const from = Number(call.url.searchParams.get("from"));
+    const to = Number(call.url.searchParams.get("to"));
+    return Response.json({ parts: Array.from({ length: to - from + 1 }, (_, index) => ({ part_number: from + index, url: `https://bucket.r2.test/part/${from + index}` })) });
+  }
+  return Response.json(stored("site/a.bin"));
+});
+
+const route = (call: Call) => `${call.method} ${call.url.host === "bucket.r2.test" ? call.url.href : call.url.pathname}`;
+
+test("up to 1 MiB goes through the API in one PUT; above it the bytes go straight to storage", async () => {
+  const api = directApi();
+  const bucket = new Bucket({ token: "k", bucket: "site", fetch: api.fetch });
+  await bucket.put("small.bin", bytes(1024 * 1024));
+  expect(api.calls.map(route)).toEqual(["PUT /v1/files/site/small.bin"]);
+  api.calls.length = 0;
+  await bucket.put("big.bin", bytes(1024 * 1024 + 1));
+  expect(api.calls.map(route)).toEqual(["POST /v1/uploads", "PUT https://bucket.r2.test/whole", "POST /v1/uploads/up_1/complete"]);
+  expect(JSON.parse(String(api.calls[0]?.body))).toMatchObject({ size_bytes: 1024 * 1024 + 1, multipart: false, if_exists: "replace" });
+  expect(api.calls[1]?.headers.has("authorization")).toBe(false);
+});
+
+test("a conditional write above 1 MiB keeps its condition on the direct upload", async () => {
+  const api = directApi();
+  const bucket = new Bucket({ token: "k", bucket: "site", fetch: api.fetch });
+  await bucket.put("big.bin", bytes(2 * 1024 * 1024), { allowOverwrite: false });
+  await bucket.put("big.bin", bytes(2 * 1024 * 1024), { ifUnchanged: '"e1"' });
+  const created = api.calls.filter((call) => call.url.pathname === "/v1/uploads").map((call) => JSON.parse(String(call.body)));
+  expect(created).toMatchObject([{ multipart: false, if_exists: "error" }, { multipart: false, if_exists: "replace", if_match: '"e1"' }]);
+});
+
+test("above the multipart threshold parts go straight to storage, in parallel, and a failed part is retried", async () => {
+  let failed = false;
+  const api = directApi((call) => {
+    if (call.url.href === "https://bucket.r2.test/part/2" && !failed) {
+      failed = true;
+      return new Response("<Error><Code>InternalError</Code></Error>", { status: 500 });
+    }
+    return undefined;
+  });
+  const bucket = new Bucket({ token: "k", bucket: "site", fetch: api.fetch, retry: { sleep: async () => undefined } });
+  await bucket.put("big.bin", bytes(40 * 1024 * 1024));
+  const parts = api.calls.filter((call) => call.url.hostname === "bucket.r2.test");
+  expect(parts.map((call) => call.url.pathname)).toEqual(["/part/1", "/part/2", "/part/3", "/part/2"]);
+  expect(parts.some((call) => call.headers.has("authorization"))).toBe(false);
+  expect(api.calls.filter((call) => call.url.pathname === "/v1/uploads/up_1/part-urls")).toHaveLength(1);
+  expect(api.calls.some((call) => call.url.pathname.includes("/parts/"))).toBe(false);
+  expect(api.calls.at(-1)?.url.pathname).toBe("/v1/uploads/up_1/complete");
+});
+
+test("a 413 that points at upload-url retries the same body once through direct upload", async () => {
+  const tooLarge = () => Response.json({ code: "file_too_large", detail: "Use upload-url.", upload_url: "/v1/files/site/a.bin/upload-url" }, { status: 413 });
+  const api = directApi((call) => (call.method === "PUT" && call.url.pathname.startsWith("/v1/files/") ? tooLarge() : undefined));
+  const bucket = new Bucket({ token: "k", bucket: "site", fetch: api.fetch });
+  await bucket.put("a.bin", bytes(10));
+  expect(api.calls.map(route)).toEqual(["PUT /v1/files/site/a.bin", "POST /v1/uploads", "PUT https://bucket.r2.test/whole", "POST /v1/uploads/up_1/complete"]);
+
+  const plain = fakeApi(() => problem(413, "file_too_large"));
+  await expect(new Bucket({ token: "k", bucket: "site", fetch: plain.fetch }).put("a.bin", bytes(10))).rejects.toMatchObject({ code: "too_large" });
+  expect(plain.calls).toHaveLength(1);
 });

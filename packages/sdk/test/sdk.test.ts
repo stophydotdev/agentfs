@@ -204,11 +204,15 @@ test("contentTypes checks the bytes, not just the label", async () => {
   await expect(bucket.put("a.png", png, { contentTypes: ["images/*"] })).rejects.toMatchObject({ code: "invalid_content_type_pattern" });
 });
 
-test("a stream needs a size or maxSize, like Upstash", async () => {
-  const bucket = new Bucket({ token: "afs_key", bucket: "site", fetch: fakeApi(() => Response.json({})).fetch });
-  const stream = () => new Blob(["abc"]).stream();
-  await expect(bucket.put("a.txt", stream())).rejects.toMatchObject({ code: "length_required" });
-  await expect(bucket.put("a.txt", stream(), { maxSize: "2b" })).rejects.toMatchObject({ code: "too_large" });
+test("a stream without a size is buffered up to 1 MiB, and needs a size or maxSize above that", async () => {
+  const api = fakeApi(() => Response.json(file("site/a.txt")));
+  const bucket = new Bucket({ token: "afs_key", bucket: "site", fetch: api.fetch });
+  const stream = (length: number) => new Blob([new Uint8Array(length)]).stream();
+  await bucket.put("a.txt", stream(3));
+  expect(api.calls[0]?.headers.get("content-length")).toBe("3");
+  await expect(bucket.put("a.txt", stream(1024 * 1024 + 1))).rejects.toMatchObject({ code: "length_required" });
+  await expect(bucket.put("a.txt", stream(3), { maxSize: "2b" })).rejects.toMatchObject({ code: "too_large" });
+  expect(api.calls).toHaveLength(1);
 });
 
 test("large overwrites and upload URLs replace atomically", async () => {
