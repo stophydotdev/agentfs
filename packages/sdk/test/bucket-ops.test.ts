@@ -138,3 +138,14 @@ test("every duration reaches the server as seconds", async () => {
     { path: "site/a", expires_in: "3600s" },
   ]);
 });
+
+test("get follows a storage redirect without the API key and keeps the API's metadata", async () => {
+  const api = fakeApi((call) =>
+    call.url.host === "storage.test"
+      ? new Response("hello", { headers: { "content-type": "text/plain", "content-length": "5", etag: '"e2"' } })
+      : new Response(null, { status: 302, headers: { location: "https://storage.test/obj?sig=1", "x-agentfs-path": "site/a.txt", "x-agentfs-meta-owner": "u7", etag: '"e2"' } }));
+  const blob = await new Bucket({ token: "k", bucket: "site", fetch: api.fetch }).get("a.txt");
+  expect(await new Response(blob.body).text()).toBe("hello");
+  expect(blob).toMatchObject({ path: "a.txt", size: 5, etag: '"e2"', contentType: "text/plain", metadata: { owner: "u7" } });
+  expect(api.calls.map((call) => [call.url.host, call.headers.has("authorization")])).toEqual([["agentfs.cloud", true], ["storage.test", false]]);
+});

@@ -477,25 +477,25 @@ export class Bucket {
   }
 
   async get(path: string): Promise<BlobDownload> {
-    const response = await this.#client.send(`/v1/files/${await this.#wire(path)}`);
-    if (!response.body) throw new BlobError("request_failed", { message: `${path} came back without a body`, status: 502 });
-    const headers = response.headers;
-    const url = headers.get("x-agentfs-url") ?? undefined;
-    const etag = headers.get("etag") ?? "";
+    const { meta, content } = await this.#client.download(`/v1/files/${await this.#wire(path)}`);
+    if (!content.body) throw new BlobError("request_failed", { message: `${path} came back without a body`, status: 502 });
+    const header = (name: string): string | null => meta.get(name) ?? content.headers.get(name);
+    const url = header("x-agentfs-url") ?? undefined;
+    const etag = header("etag") ?? "";
     const metadata: Record<string, string> = {};
-    headers.forEach((value, name) => {
+    meta.forEach((value, name) => {
       if (name.startsWith("x-agentfs-meta-")) metadata[name.slice("x-agentfs-meta-".length)] = value;
     });
-    const stored = headers.get("x-agentfs-path");
+    const stored = header("x-agentfs-path");
     return {
       path: stored ? await this.#relative(decodePath(stored)) : path,
       ...(url ? { url, versionedUrl: `${url}?v=${encodeURIComponent(etag.replaceAll('"', ""))}` } : {}),
-      size: Number(headers.get("content-length") ?? 0),
+      size: Number(content.headers.get("content-length") ?? meta.get("content-length") ?? 0),
       etag,
-      uploadedAt: new Date(headers.get("last-modified") ?? Date.now()),
-      contentType: headers.get("content-type") ?? "application/octet-stream",
+      uploadedAt: new Date(header("last-modified") ?? Date.now()),
+      contentType: content.headers.get("content-type") ?? meta.get("content-type") ?? "application/octet-stream",
       metadata,
-      body: response.body,
+      body: content.body,
     };
   }
 
