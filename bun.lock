@@ -30,6 +30,12 @@
         "react": "19",
         "typescript": "^6.0.3",
       },
+      "peerDependencies": {
+        "react": ">=18",
+      },
+      "optionalPeers": [
+        "react",
+      ],
     },
   },
   "packages": {
