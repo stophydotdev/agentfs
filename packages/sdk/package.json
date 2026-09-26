@@ -1,6 +1,6 @@
 {
   "name": "@agentfs/sdk",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Upstash Blob-style SDK for AgentFS: Bucket put/get/list/del/copy/move, signed URLs, browser uploads and a React hook.",
   "license": "MIT",
   "type": "module",
