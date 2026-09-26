@@ -247,6 +247,10 @@ const STATUS_FALLBACK: Partial<Record<number, BlobErrorCode>> = {
   503: "not_ready",
 };
 
+const DIRECT_ONLY = new WeakSet<BlobError>();
+
+export const needsDirectUpload = (error: unknown): boolean => BlobError.is(error) && DIRECT_ONLY.has(error);
+
 const KEEPS_DETAIL = new Set<BlobErrorCode>(["invalid_input", "forbidden", "content_type_not_allowed", "already_exists", "request_failed"]);
 
 export const errorFromResponse = async (response: Response, fallback: string): Promise<BlobError> => {
@@ -258,11 +262,13 @@ export const errorFromResponse = async (response: Response, fallback: string): P
   const detail = (problem.success && problem.data.detail) || /<Message>([^<]*)<\/Message>/.exec(text)?.[1] || fallback;
   const retryable = problem.success && problem.data.retryable !== undefined ? problem.data.retryable : retryableStatus(response.status);
   const retryAfter = parseRetryAfter(response.headers.get("retry-after"));
-  return new BlobError(code, {
+  const error = new BlobError(code, {
     ...(KEEPS_DETAIL.has(code) ? { message: code === "request_failed" ? `request failed with ${response.status}: ${detail}` : detail } : {}),
     ...(code === "request_failed" ? { status: response.status >= 500 ? 502 : response.status } : {}),
     retryable,
     ...(apiCode === undefined ? {} : { apiCode }),
     ...(retryAfter === undefined ? {} : { retryAfter }),
   });
+  if (response.status === 413 && text.includes("upload-url")) DIRECT_ONLY.add(error);
+  return error;
 };
