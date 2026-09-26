@@ -5,7 +5,8 @@ import { defaultRetryPolicy, ExpiredUrlError, withRetry, type RetryPolicy } from
 import { fileSchema, partUrlsSchema, uploadSessionSchema, type StoredFile, type UploadSession } from "./schemas";
 
 const PART_URL_BATCH = 100;
-const COMPLETE_POLLS = 30;
+const COMPLETE_POLLS = 40;
+const COMPLETE_POLL_MAX_MS = 1000;
 
 export interface ClientOptions {
   readonly token: string;
@@ -13,12 +14,18 @@ export interface ClientOptions {
   readonly fetch?: typeof fetch;
   readonly retry?: Partial<RetryPolicy>;
   readonly concurrency?: number;
+  readonly headers?: Record<string, string>;
 }
 
 export type Source = Blob | { readonly stream: ReadableStream<Uint8Array>; readonly size: number };
 
+export type Visibility = "public" | "unlisted" | "private";
+
 export interface WriteOptions {
-  readonly contentType: string;
+  readonly contentType?: string;
+  readonly visibility?: Visibility;
+  readonly expiresIn?: string;
+  readonly label?: string;
   readonly cache?: string;
   readonly metadata?: Record<string, string>;
   readonly signal?: AbortSignal;
@@ -91,6 +98,15 @@ const chunker = (stream: ReadableStream<Uint8Array>, declared: number) => {
   };
 };
 
+const writeFields = (write: WriteOptions): Record<string, string> => {
+  const fields: Record<string, string> = {};
+  if (write.cache) fields.cache = write.cache;
+  if (write.visibility) fields.visibility = write.visibility;
+  if (write.expiresIn) fields.expires_in = write.expiresIn;
+  if (write.label) fields.label = write.label;
+  return fields;
+};
+
 export const createClient = (options: ClientOptions) => {
   const baseUrl = (options.baseUrl ?? "https://agentfs.cloud").replace(/\/+$/, "");
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
@@ -100,12 +116,31 @@ export const createClient = (options: ClientOptions) => {
   const send = async (path: string, { idempotent, ...init }: Init = {}): Promise<Response> => {
     const method = init.method ?? "GET";
     const attempt = async () => {
-      const response = await fetchImpl(`${baseUrl}${path}`, { ...init, headers: { authorization: `Bearer ${options.token}`, ...init.headers } });
+      const response = await fetchImpl(`${baseUrl}${path}`, { ...init, headers: { authorization: `Bearer ${options.token}`, ...options.headers, ...init.headers } });
+      if (init.redirect === "manual" && (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400))) return response;
       if (!response.ok) throw await errorFromResponse(response, `${method} ${path} failed with ${response.status}.`);
       return response;
     };
     const retried = !(init.body instanceof ReadableStream) && (idempotent ?? RETRIED_METHODS.has(method.toUpperCase()));
     return retried ? withRetry(attempt, policy, init.signal) : attempt();
+  };
+
+  const download = async (path: string): Promise<{ readonly meta: Headers; readonly content: Response }> => {
+    const first = await send(path, { redirect: "manual" });
+    if (first.type === "opaqueredirect") {
+      const followed = await send(path);
+      return { meta: followed.headers, content: followed };
+    }
+    const location = first.headers.get("location");
+    if (first.status < 300 || first.status >= 400 || !location) return { meta: first.headers, content: first };
+    const target = new URL(location, `${baseUrl}${path}`);
+    const headers: Record<string, string> = target.origin === new URL(baseUrl).origin ? { authorization: `Bearer ${options.token}` } : {};
+    const content = await withRetry(async () => {
+      const response = await fetchImpl(target.href, { headers });
+      if (!response.ok) throw await errorFromResponse(response, `GET ${path} failed with ${response.status} at storage.`);
+      return response;
+    }, policy);
+    return { meta: first.headers, content };
   };
 
   const json = async <Schema extends z.ZodType>(schema: Schema, path: string, init?: Init): Promise<z.infer<Schema>> =>
@@ -124,10 +159,11 @@ export const createClient = (options: ClientOptions) => {
   const bytesOf = (source: Source): Blob | ReadableStream<Uint8Array> => (source instanceof Blob ? source : source.stream);
 
   const putFile = async (path: string, source: Source, write: WriteOptions & PutConditions): Promise<StoredFile> => {
-    const query = new URLSearchParams({ infer_content_type: "false" });
-    if (write.cache) query.set("cache", write.cache);
+    const query = new URLSearchParams(writeFields(write));
+    if (write.contentType !== undefined) query.set("infer_content_type", "false");
     if (write.metadata) query.set("metadata", JSON.stringify(write.metadata));
-    const headers: Record<string, string> = { "content-type": write.contentType, "content-length": String(source.size) };
+    const headers: Record<string, string> = { "content-length": String(source.size) };
+    if (write.contentType !== undefined) headers["content-type"] = write.contentType;
     if (write.ifNoneMatch) headers["if-none-match"] = "*";
     if (write.ifMatch !== undefined) headers["if-match"] = write.ifMatch;
     const stored = await json(fileSchema, `/v1/files/${encodePath(path)}?${query}`, { method: "PUT", ...bodyInit(bytesOf(source)), headers, ...(write.signal ? { signal: write.signal } : {}) });
@@ -226,7 +262,7 @@ export const createClient = (options: ClientOptions) => {
     for (let attempt = 0; attempt < COMPLETE_POLLS; attempt += 1) {
       const response = await withRetry(() => send(`/v1/uploads/${id}/complete`, { method: "POST", ...(signal ? { signal } : {}) }), policy, signal);
       if (response.status === 200) return fileSchema.parse(await response.json());
-      await policy.sleep(1000);
+      await policy.sleep(Math.min(COMPLETE_POLL_MAX_MS, 100 * 2 ** attempt));
     }
     throw new BlobError("not_ready", { message: `Upload ${id} is still finishing. Check it later with info().`, status: 504, retryable: true });
   };
@@ -238,9 +274,8 @@ export const createClient = (options: ClientOptions) => {
       multipart: write.multipart,
       if_exists: write.ifExists,
       ...(write.ifMatch === undefined ? {} : { if_match: write.ifMatch }),
-      content_type: write.contentType,
-      infer_content_type: false,
-      cache: write.cache,
+      ...(write.contentType === undefined ? {} : { content_type: write.contentType, infer_content_type: false }),
+      ...writeFields(write),
       metadata: write.metadata,
     }, write.signal)), policy, write.signal);
     try {
@@ -254,7 +289,7 @@ export const createClient = (options: ClientOptions) => {
     return complete(created.id, write.signal);
   };
 
-  return { send, json, jsonInit, putFile, upload, complete, policy };
+  return { send, download, json, jsonInit, putFile, upload, complete, policy };
 };
 
 export type Client = ReturnType<typeof createClient>;

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const fileSchema = z.object({
+export const fileSchema = z.looseObject({
   id: z.string(),
   name: z.string(),
   path: z.string(),
