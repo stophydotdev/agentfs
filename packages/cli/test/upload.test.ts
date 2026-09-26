@@ -71,6 +71,18 @@ test("a large file uses a multipart session, sends every part and completes", as
   expect(progress.at(-1)).toBe(10);
 });
 
+test("a file over 1 MiB goes straight to storage without the key, then completes through the API", async () => {
+  const { api, client } = keyed({ direct: true });
+  const content = "x".repeat(1024 * 1024 + 1);
+
+  await uploadFile(client, localFile("mid.bin", content), { replace: true });
+
+  expect(api.seen.map((entry) => `${entry.method} ${entry.path}`)).toEqual(["GET /v1/me", "POST /v1/uploads", "PUT /storage/whole", "POST /v1/uploads/up_1/complete"]);
+  expect(JSON.parse(api.seen[1]?.body ?? "{}")).toMatchObject({ size_bytes: content.length, multipart: false, if_exists: "replace" });
+  expect(api.seen[2]?.headers.has("authorization")).toBe(false);
+  expect(api.parts.get(1)).toBe(content);
+});
+
 test("a part that fails with 503 is retried with the CLI's backoff and the upload completes", async () => {
   const { api, client, sleeps, transfer } = session({ partSize: 4, failures: { 2: [{ status: 503 }, { status: 503 }] } });
 

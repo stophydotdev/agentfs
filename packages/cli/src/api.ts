@@ -122,6 +122,17 @@ export function createClient({ apiKey, apiUrl }: { apiKey: string | undefined; a
 
   const send = async (path: string, init: Init = {}) => {
     const response = await fetch(new URL(path, apiUrl), { ...init, headers: headers(init.headers) });
+    const redirect = init.redirect === "manual" && response.status >= 300 && response.status < 400;
+    if (!response.ok && !redirect) throw await apiError(response);
+    return response;
+  };
+
+  const content = async (id: string) => {
+    const first = await send(`/v1/files/${encodeURIComponent(id)}/content`, { redirect: "manual" });
+    const location = first.ok ? null : first.headers.get("location");
+    if (!location) return first;
+    const target = new URL(location, apiUrl);
+    const response = await fetch(target, target.origin === new URL(apiUrl).origin ? { headers: headers() } : {});
     if (!response.ok) throw await apiError(response);
     return response;
   };
@@ -156,7 +167,7 @@ export function createClient({ apiKey, apiUrl }: { apiKey: string | undefined; a
         method: "POST",
         ...body(expiresIn ? { expires_in: expiresIn } : {}),
       }),
-    content: (id: string) => send(`/v1/files/${encodeURIComponent(id)}/content`),
+    content,
     uploadForm: (form: FormData, extra: Record<string, string>) =>
       json(fileSchema, "/v1/files", { method: "POST", body: form, headers: extra }),
     transfer: (extra: Record<string, string>, tuning: { concurrency: number; retry: Partial<RetryPolicy> }) =>

@@ -19,6 +19,8 @@ export type FakeOptions = {
   partSize?: number;
   takenPaths?: string[];
   failures?: Record<number, Failure[]>;
+  direct?: boolean;
+  contentAt?: string;
 };
 
 export function fakeApi(options: FakeOptions = {}) {
@@ -52,11 +54,18 @@ export function fakeApi(options: FakeOptions = {}) {
         entry.body = await request.text();
       }
       seen.push(entry);
+      if (url.pathname === "/storage/whole" && request.method === "PUT") {
+        parts.set(1, entry.body);
+        return new Response(null);
+      }
       if (!request.headers.has("authorization") && url.pathname === "/v1/files" && request.method === "POST") {
         return Response.json({ ...file(`guest/${(entry.form?.file ?? "file:x").slice(5)}`), expires_at: "2026-09-24T00:00:00.000Z" }, { status: 201 });
       }
       if (request.headers.get("authorization") !== "Bearer afs_test") {
         return Response.json({ code: "unauthorized", detail: "Missing or invalid API key." }, { status: 401 });
+      }
+      if (url.pathname === "/v1/files/f_1/content" && options.contentAt) {
+        return new Response(null, { status: 302, headers: { location: options.contentAt } });
       }
       if (url.pathname === "/v1/me") return Response.json({ id: "org_1", authenticated: true, default_project: "default", plan: "Free" });
       const raw = url.pathname.match(/^\/v1\/files\/(.+)$/);
@@ -69,6 +78,9 @@ export function fakeApi(options: FakeOptions = {}) {
       }
       const sessionObject = () => {
         if (!session) return Response.json({ code: "upload_not_found" }, { status: 404 });
+        if (options.direct) {
+          return Response.json({ id: "up_1", status: "active", transport: "s3", part_size: session.size, total_parts: 1, upload_url: `${url.origin}/storage/whole`, uploaded_parts: [] });
+        }
         return Response.json({
           id: "up_1",
           status: "active",

@@ -96,8 +96,6 @@ export async function uploadFile(
     ...(options.label ? { label: options.label } : {}),
     ...(onProgress ? { onProgress: (done: number) => onProgress(done) } : {}),
   };
-  const stored = stats.size <= transfer.sessionThreshold
-    ? await sdk.putFile(path, blob, { ...write, ifNoneMatch: options.replace !== true })
-    : await sdk.upload(path, blob, { ...write, multipart: true, ifExists: options.replace ? "replace" : "error" });
+  const stored = await sdk.store(path, blob, { ...write, multipart: stats.size > transfer.sessionThreshold, ifExists: options.replace ? "replace" : "error" });
   return fileSchema.parse(stored);
 }
