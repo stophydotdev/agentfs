@@ -127,3 +127,17 @@ test("download refuses to overwrite a file and never writes outside the folder",
     api.stop();
   }
 });
+
+test("download follows a storage redirect without sending the key", async () => {
+  const storage = Bun.serve({ port: 0, fetch: (request) => new Response(request.headers.has("authorization") ? "leaked" : "bytes") });
+  const api = fakeApi({ contentAt: `http://127.0.0.1:${storage.port}/obj?sig=1` });
+  process.env.AGENTFS_API_URL = api.url;
+  const dir = mkdtempSync(join(tmpdir(), "agentfs-"));
+  try {
+    expect(await main(["download", "f_1", "-o", join(dir, "got.bin"), "--json", "--api-key", "afs_test"])).toBe(0);
+    expect(readFileSync(join(dir, "got.bin"), "utf8")).toBe("bytes");
+  } finally {
+    api.stop();
+    storage.stop(true);
+  }
+});
