@@ -163,3 +163,16 @@ test("get reads the record from info when a redirect carries no metadata", async
   expect(await new Response(blob.body).text()).toBe("hello");
   expect(api.calls.map((call) => [call.url.host, call.headers.has("authorization")])).toEqual([["agentfs.cloud", true], ["edge.test", false], ["agentfs.cloud", true]]);
 });
+
+test("a bucket tags every request with its run and agent, and lists by run", async () => {
+  const api = fakeApi((call) => call.method === "PUT"
+    ? Response.json(stored("site/out.md", { run_id: "run_7", agent_id: "writer", expires_at: "2026-10-01T00:00:00.000Z" }), { status: 201 })
+    : Response.json({ items: [], next_cursor: null }));
+  const bucket = new Bucket({ token: "k", bucket: "site", fetch: api.fetch, runId: "run_7", agentId: "writer" });
+  const put = await bucket.put("out.md", "hi", { expiresIn: "7d" });
+  await bucket.list({ runId: "run_7" });
+  expect(api.calls.map((call) => [call.headers.get("x-run-id"), call.headers.get("x-agent-id")])).toEqual([["run_7", "writer"], ["run_7", "writer"]]);
+  expect(api.calls[0]?.url.searchParams.get("expires_in")).toBe("604800s");
+  expect(api.calls[1]?.url.searchParams.get("run_id")).toBe("run_7");
+  expect(put).toMatchObject({ runId: "run_7", agentId: "writer", expiresAt: new Date("2026-10-01T00:00:00.000Z") });
+});

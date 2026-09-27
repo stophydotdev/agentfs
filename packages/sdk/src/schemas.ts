@@ -15,6 +15,9 @@ export const fileSchema = z.looseObject({
   metadata: z.record(z.string(), z.string()).optional(),
   created_at: z.string(),
   updated_at: z.string().optional(),
+  run_id: z.string().nullable().optional(),
+  agent_id: z.string().nullable().optional(),
+  expires_at: z.string().nullable().optional(),
 });
 
 export const fileListSchema = z.object({

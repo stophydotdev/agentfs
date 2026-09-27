@@ -38,6 +38,8 @@ export interface BucketOptions {
   readonly retry?: Partial<RetryPolicy>;
   readonly concurrency?: number;
   readonly enableTelemetry?: boolean;
+  readonly runId?: string;
+  readonly agentId?: string;
 }
 
 export type FromEnvOptions = Omit<BucketOptions, "token">;
@@ -49,6 +51,9 @@ export interface BlobObject {
   size: number;
   etag: string;
   uploadedAt: Date;
+  runId?: string;
+  agentId?: string;
+  expiresAt?: Date;
 }
 
 export interface CompletedBlob extends BlobObject {
@@ -74,6 +79,7 @@ export interface PutOptions {
   allowOverwrite?: boolean;
   ifUnchanged?: string;
   multipart?: MultipartOption;
+  expiresIn?: Duration;
   onProgress?: (uploaded: number, total: number) => void;
   signal?: AbortSignal;
 }
@@ -82,6 +88,8 @@ export interface ListOptions {
   prefix?: string;
   limit?: number;
   cursor?: string;
+  runId?: string;
+  agentId?: string;
 }
 
 export interface ListPage {
@@ -283,6 +291,11 @@ const wantsMultipart = (option: MultipartOption | undefined, size: number): bool
   return size > (option === undefined ? MULTIPART_THRESHOLD : parseSize(option, "multipart"));
 };
 
+const agentHeaders = ({ runId, agentId }: Pick<BucketOptions, "runId" | "agentId">): Record<string, string> => ({
+  ...(runId ? { "x-run-id": runId } : {}),
+  ...(agentId ? { "x-agent-id": agentId } : {}),
+});
+
 export interface BucketInternals {
   readonly client: Client;
   readonly token: string;
@@ -309,7 +322,7 @@ export class Bucket {
 
   constructor(options: BucketOptions) {
     if (!options.token) throw new BlobError("unauthorized", { message: "A token is required: pass { token } or set AGENTFS_TOKEN.", status: 401 });
-    this.#client = createClient(options);
+    this.#client = createClient({ ...options, headers: agentHeaders(options) });
     this.#defaultCache = options.cache;
     if (options.bucket) this.#project = Promise.resolve(options.bucket);
     this.#bucketName = options.bucket;
@@ -330,7 +343,9 @@ export class Bucket {
     const rest = typeof nameOrOptions === "string" ? options : nameOrOptions;
     const token = envValue(name) ?? envValue("AGENTFS_API_KEY") ?? "";
     const bucket = rest.bucket ?? envValue("AGENTFS_BUCKET");
-    return new Bucket({ ...rest, token, ...(bucket ? { bucket } : {}) });
+    const runId = rest.runId ?? envValue("AGENTFS_RUN_ID");
+    const agentId = rest.agentId ?? envValue("AGENTFS_AGENT_ID");
+    return new Bucket({ ...rest, token, ...(bucket ? { bucket } : {}), ...(runId ? { runId } : {}), ...(agentId ? { agentId } : {}) });
   }
 
   async #full(path: string): Promise<string> {
@@ -360,6 +375,9 @@ export class Bucket {
       size: file.size_bytes,
       etag: file.etag ?? "",
       uploadedAt: new Date(file.updated_at ?? file.created_at),
+      ...(file.run_id ? { runId: file.run_id } : {}),
+      ...(file.agent_id ? { agentId: file.agent_id } : {}),
+      ...(file.expires_at ? { expiresAt: new Date(file.expires_at) } : {}),
     };
   }
 
@@ -421,6 +439,7 @@ export class Bucket {
       contentType,
       ...(cache === undefined ? {} : { cache: wireCache(cache) }),
       ...(metadata ? { metadata } : {}),
+      ...(options.expiresIn === undefined ? {} : { expiresIn: wireDuration(options.expiresIn, "expiresIn", 1) }),
       ...(options.signal ? { signal: options.signal } : {}),
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),
     };
@@ -521,6 +540,8 @@ export class Bucket {
       limit: String(Math.min(Math.max(Math.floor(options.limit ?? LIST_LIMIT), 1), LIST_LIMIT)),
     });
     if (options.cursor) query.set("cursor", options.cursor);
+    if (options.runId) query.set("run_id", options.runId);
+    if (options.agentId) query.set("agent_id", options.agentId);
     const page = await this.#client.json(fileListSchema, `/v1/files?${query}`);
     return { blobs: await Promise.all(page.items.map((file) => this.#object(file))), cursor: page.next_cursor ?? undefined };
   }
