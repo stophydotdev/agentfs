@@ -168,14 +168,14 @@ test("uploadHandler refuses bad route names, an empty routes map and a missing b
   const onBeforeUpload = () => ({ path: "a.txt" });
   expect(() => uploadHandler({ bucket, onBeforeUpload, routes: {} })).toThrow(new TypeError("uploadHandler was given an empty routes map: name at least one route, or omit routes to make the handler the route"));
   expect(() => uploadHandler({ bucket, onBeforeUpload, routes: { "my route": {} } })).toThrow(new TypeError('upload route names must match /^[A-Za-z_][\\w-]*$/: "my route" does not'));
-  const saved = { token: process.env.AGENTFS_TOKEN, key: process.env.AGENTFS_API_KEY };
-  delete process.env.AGENTFS_TOKEN;
+  const saved = { token: process.env.AGENTFS_KEY, key: process.env.AGENTFS_API_KEY };
+  delete process.env.AGENTFS_KEY;
   delete process.env.AGENTFS_API_KEY;
   try {
-    expect(() => uploadHandler({ onBeforeUpload })).toThrow(new TypeError("uploadHandler has no bucket and AGENTFS_TOKEN is not set: set it, or pass bucket (on Workers it has to be bucket: new Bucket({ token: env.AGENTFS_TOKEN }))"));
-    expect(() => uploadHandler({ onBeforeUpload, routes: { avatar: {} } })).toThrow(new TypeError('upload route "avatar" has no bucket and AGENTFS_TOKEN is not set: set it, or pass bucket (on Workers it has to be bucket: new Bucket({ token: env.AGENTFS_TOKEN }))'));
+    expect(() => uploadHandler({ onBeforeUpload })).toThrow(new TypeError("uploadHandler has no bucket and AGENTFS_KEY is not set: set it, or pass bucket (on Workers it has to be bucket: new Bucket({ token: env.AGENTFS_KEY }))"));
+    expect(() => uploadHandler({ onBeforeUpload, routes: { avatar: {} } })).toThrow(new TypeError('upload route "avatar" has no bucket and AGENTFS_KEY is not set: set it, or pass bucket (on Workers it has to be bucket: new Bucket({ token: env.AGENTFS_KEY }))'));
   } finally {
-    if (saved.token !== undefined) process.env.AGENTFS_TOKEN = saved.token;
+    if (saved.token !== undefined) process.env.AGENTFS_KEY = saved.token;
     if (saved.key !== undefined) process.env.AGENTFS_API_KEY = saved.key;
   }
 });

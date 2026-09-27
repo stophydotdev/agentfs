@@ -176,3 +176,12 @@ test("a bucket tags every request with its run and agent, and lists by run", asy
   expect(api.calls[1]?.url.searchParams.get("run_id")).toBe("run_7");
   expect(put).toMatchObject({ runId: "run_7", agentId: "writer", expiresAt: new Date("2026-10-01T00:00:00.000Z") });
 });
+
+test("a full account is storage_full, and grace warnings reach onWarning", async () => {
+  const warnings: string[] = [];
+  const full = fakeApi(() => problem(413, "storage_limit_exceeded"));
+  await expect(new Bucket({ token: "k", bucket: "site", fetch: full.fetch }).put("a.md", "hi")).rejects.toMatchObject({ code: "storage_full" });
+  const grace = fakeApi(() => Response.json(stored("site/a.md"), { status: 201, headers: { "agentfs-warning": "storage_over_limit: 2.1 GB used" } }));
+  await new Bucket({ token: "k", bucket: "site", fetch: grace.fetch, onWarning: (message) => warnings.push(message) }).put("a.md", "hi");
+  expect(warnings).toEqual(["agentfs: storage_over_limit: 2.1 GB used"]);
+});

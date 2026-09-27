@@ -16,6 +16,7 @@ export interface ClientOptions {
   readonly retry?: Partial<RetryPolicy>;
   readonly concurrency?: number;
   readonly headers?: Record<string, string>;
+  readonly onWarning?: (message: string) => void;
 }
 
 export type Source = Blob | { readonly stream: ReadableStream<Uint8Array>; readonly size: number };
@@ -120,6 +121,8 @@ export const createClient = (options: ClientOptions) => {
       const response = await fetchImpl(`${baseUrl}${path}`, { ...init, headers: { authorization: `Bearer ${options.token}`, ...options.headers, ...init.headers } });
       if (init.redirect === "manual" && (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400))) return response;
       if (!response.ok) throw await errorFromResponse(response, `${method} ${path} failed with ${response.status}.`);
+      const warning = response.headers.get("agentfs-warning");
+      if (warning) (options.onWarning ?? console.warn)(`agentfs: ${warning}`);
       return response;
     };
     const retried = !(init.body instanceof ReadableStream) && (idempotent ?? RETRIED_METHODS.has(method.toUpperCase()));

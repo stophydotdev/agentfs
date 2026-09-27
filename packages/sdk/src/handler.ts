@@ -25,11 +25,11 @@ const DEFAULT_MULTIPART = "16mb";
 const CONSTRAINTS_MAX_AGE = 60;
 const SIZE_MISMATCH = new Set(["size_mismatch", "checksum_mismatch"]);
 const ROUTE_NAME = /^[A-Za-z_][\w-]*$/;
-const TOKEN_ENV = "AGENTFS_TOKEN";
+const TOKEN_ENV = "AGENTFS_KEY";
 
 const tokenFromEnv = (): string | undefined => {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
-  return env?.[TOKEN_ENV] || env?.AGENTFS_API_KEY || undefined;
+  return env?.[TOKEN_ENV] || env?.AGENTFS_TOKEN || env?.AGENTFS_API_KEY || undefined;
 };
 
 export interface StandardIssue {

@@ -2,6 +2,16 @@
 
 File storage for apps and agents on [AgentFS](https://agentfs.cloud). The API matches `@upstash/blob`: a `Bucket` on the server, direct uploads from the browser, and a React hook.
 
+## Quickstart
+
+```ts
+import { Bucket } from "@agentfs/sdk";
+
+const { url } = await Bucket.fromEnv().put("reports/q3.md", "# Q3");
+```
+
+Set `AGENTFS_KEY` to an API key from [the dashboard](https://agentfs.cloud/api-keys), or run `npx @agentfs/cli login`.
+
 ```bash
 npm install @agentfs/sdk
 ```
@@ -9,7 +19,7 @@ npm install @agentfs/sdk
 ```ts
 import { Bucket, uniquePath } from "@agentfs/sdk";
 
-const bucket = Bucket.fromEnv(); // AGENTFS_TOKEN, and AGENTFS_BUCKET or the key's default project
+const bucket = Bucket.fromEnv(); // AGENTFS_KEY, and AGENTFS_BUCKET or the key's default project
 
 const blob = await bucket.put(uniquePath`avatars/${file.name}`, file, { contentType: "image/png" });
 blob.url;          // served at its path
@@ -38,6 +48,7 @@ A bucket is an AgentFS project. `new Bucket({ token, bucket: "site" })` picks on
 | `allowOverwrite` | `true` | `false` fails with `already_exists` if a file is there |
 | `ifUnchanged` | none | An etag; fails with `conflict` if the file changed |
 | `multipart` | `"16mb"` | Size above which the body goes up in parts; `true` or `false` forces it |
+| `expiresIn` | none | Delete the file after a duration like `24h` or `7d` |
 
 Bodies over 1 MB go straight to storage; over 16 MB they go up in parts, several at a time, with retries per part. `allowOverwrite: false` and `ifUnchanged` work up to 5 GB. A stream needs `size` or `maxSize` unless it is 1 MB or less.
 
@@ -48,6 +59,20 @@ await bucket.updateJson<{ n: number }>("count.json", (prev) => ({ n: (prev?.n ??
 await bucket.del(["a.png", "b.png"]);
 await bucket.del({ prefix: "tmp/" });
 ```
+
+## For agents
+
+Tag everything a run writes, so you can find it again and clean it up:
+
+```ts
+const bucket = Bucket.fromEnv({ runId: "run_42", agentId: "researcher" });
+await bucket.put("scratch/notes.md", notes, { expiresIn: "7d" });
+const { blobs } = await bucket.list({ runId: "run_42" }); // each has runId, agentId, expiresAt
+```
+
+`fromEnv` also reads `AGENTFS_RUN_ID` and `AGENTFS_AGENT_ID`, so a harness can set them once for every tool call.
+
+On Free, Starter and Developer, uploads keep working for 10% past the plan's storage. Each one in that zone calls `onWarning` with a message saying what is used and where uploads stop (default: `console.warn`). Past that, writes fail with `storage_full`.
 
 ## Links
 
@@ -132,7 +157,7 @@ Keys are the same paths `put` writes, so both see the same files. One `PutObject
 
 ## Errors
 
-Every failure throws a `BlobError` with a `code`: `not_found`, `already_exists`, `conflict`, `content_type_not_allowed`, `invalid_content_type_pattern`, `invalid_input`, `too_large`, `empty_body`, `length_required`, `signature_mismatch`, `unauthorized`, `forbidden`, `rate_limited`, `mint_backoff`, `not_ready`, `partial_delete`, `move_left_a_copy` or `request_failed`. Reads, writes, copies and deletes that fail with `429`, `5xx` or a dropped connection are tried up to 3 times with jittered backoff, honoring `Retry-After` up to 10 seconds. Streamed bodies are sent once.
+Every failure throws a `BlobError` with a `code`: `not_found`, `already_exists`, `conflict`, `content_type_not_allowed`, `invalid_content_type_pattern`, `invalid_input`, `too_large`, `storage_full`, `empty_body`, `length_required`, `signature_mismatch`, `unauthorized`, `forbidden`, `rate_limited`, `mint_backoff`, `not_ready`, `partial_delete`, `move_left_a_copy` or `request_failed`. Reads, writes, copies and deletes that fail with `429`, `5xx` or a dropped connection are tried up to 3 times with jittered backoff, honoring `Retry-After` up to 10 seconds. Streamed bodies are sent once.
 
 ```ts
 import { BlobError } from "@agentfs/sdk";

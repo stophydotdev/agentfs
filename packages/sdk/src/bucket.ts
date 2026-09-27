@@ -40,6 +40,7 @@ export interface BucketOptions {
   readonly enableTelemetry?: boolean;
   readonly runId?: string;
   readonly agentId?: string;
+  readonly onWarning?: (message: string) => void;
 }
 
 export type FromEnvOptions = Omit<BucketOptions, "token">;
@@ -321,7 +322,7 @@ export class Bucket {
   readonly #bucketName: string | undefined;
 
   constructor(options: BucketOptions) {
-    if (!options.token) throw new BlobError("unauthorized", { message: "A token is required: pass { token } or set AGENTFS_TOKEN.", status: 401 });
+    if (!options.token) throw new BlobError("unauthorized", { message: "A token is required: pass { token } or set AGENTFS_KEY.", status: 401 });
     this.#client = createClient({ ...options, headers: agentHeaders(options) });
     this.#defaultCache = options.cache;
     if (options.bucket) this.#project = Promise.resolve(options.bucket);
@@ -338,14 +339,15 @@ export class Bucket {
 
   static fromEnv(options?: FromEnvOptions): Bucket;
   static fromEnv(name: string | undefined, options?: FromEnvOptions): Bucket;
-  static fromEnv(nameOrOptions: string | FromEnvOptions = "AGENTFS_TOKEN", options: FromEnvOptions = {}): Bucket {
-    const name = typeof nameOrOptions === "string" ? nameOrOptions : "AGENTFS_TOKEN";
+  static fromEnv(nameOrOptions: string | FromEnvOptions = "AGENTFS_KEY", options: FromEnvOptions = {}): Bucket {
+    const name = typeof nameOrOptions === "string" ? nameOrOptions : "AGENTFS_KEY";
     const rest = typeof nameOrOptions === "string" ? options : nameOrOptions;
-    const token = envValue(name) ?? envValue("AGENTFS_API_KEY") ?? "";
+    const token = envValue(name) ?? envValue("AGENTFS_TOKEN") ?? envValue("AGENTFS_API_KEY") ?? "";
+    const baseUrl = rest.baseUrl ?? envValue("AGENTFS_API_URL");
     const bucket = rest.bucket ?? envValue("AGENTFS_BUCKET");
     const runId = rest.runId ?? envValue("AGENTFS_RUN_ID");
     const agentId = rest.agentId ?? envValue("AGENTFS_AGENT_ID");
-    return new Bucket({ ...rest, token, ...(bucket ? { bucket } : {}), ...(runId ? { runId } : {}), ...(agentId ? { agentId } : {}) });
+    return new Bucket({ ...rest, token, ...(baseUrl ? { baseUrl } : {}), ...(bucket ? { bucket } : {}), ...(runId ? { runId } : {}), ...(agentId ? { agentId } : {}) });
   }
 
   async #full(path: string): Promise<string> {

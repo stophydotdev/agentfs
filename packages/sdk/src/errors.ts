@@ -7,6 +7,7 @@ export type BlobErrorCode =
   | "content_type_not_allowed"
   | "invalid_input"
   | "too_large"
+  | "storage_full"
   | "empty_body"
   | "length_required"
   | "signature_mismatch"
@@ -30,7 +31,7 @@ const FROM_API: Record<string, BlobErrorCode> = {
   idempotency_conflict: "conflict",
   content_type_not_allowed: "content_type_not_allowed",
   file_too_large: "too_large",
-  storage_limit_exceeded: "too_large",
+  storage_limit_exceeded: "storage_full",
   length_required: "length_required",
   unauthorized: "unauthorized",
   forbidden: "forbidden",
@@ -62,6 +63,7 @@ export const STATUS: Record<BlobErrorCode, number> = {
   content_type_not_allowed: 400,
   invalid_input: 400,
   too_large: 413,
+  storage_full: 413,
   empty_body: 400,
   length_required: 411,
   signature_mismatch: 403,
@@ -83,6 +85,7 @@ const DEFAULT_MESSAGE: Record<BlobErrorCode, string> = {
   content_type_not_allowed: "content type not allowed",
   invalid_input: "invalid input",
   too_large: "too large",
+  storage_full: "account storage is full",
   empty_body: "empty body",
   length_required: "length required",
   signature_mismatch: "signature mismatch",
@@ -100,6 +103,7 @@ const DEFAULT_MESSAGE: Record<BlobErrorCode, string> = {
 const DEFAULT_HINT: Partial<Record<BlobErrorCode, string>> = {
   signature_mismatch: "a 403 from R2 usually means the body length or type differs from the signature",
   length_required: "pass { size } or { maxSize } so the length is known before the first byte",
+  storage_full: "delete files you no longer need, or upgrade the plan",
 };
 
 const CODE_FOR_STATUS: Partial<Record<number, BlobErrorCode>> = {
