@@ -22,7 +22,8 @@ curl -X PUT $AGENTFS/v1/files/reports/run.html \
 
 The answer holds the file's `url`. Anyone with the link can open it. Uploading to the same
 path again keeps the link. `x-sha256` is required, and bytes that do not match it return
-`sha256_mismatch` with nothing stored. One request holds up to 90 MiB.
+`sha256_mismatch` with nothing stored. Send a `Content-Length`; a body without one returns
+`length_required`. One request holds up to 90 MiB.
 
 ## Upload many files and send only new bytes
 
@@ -41,17 +42,20 @@ call.
 ```bash
 head -c 6000000 /dev/urandom > big.bin
 SHA=$(sha256sum big.bin | cut -d' ' -f1)
-ID=$(curl -s -X POST $AGENTFS/v1/uploads -H "authorization: Bearer $KEY" \
-  -d "{\"path\":\"big.bin\",\"sha256\":\"$SHA\",\"size\":6000000}" | jq -r .uploadId)
+START=$(curl -s -X POST $AGENTFS/v1/uploads -H "authorization: Bearer $KEY" \
+  -d "{\"path\":\"big.bin\",\"sha256\":\"$SHA\",\"size\":6000000}")
+PARTS=$AGENTFS/v1/uploads/$(echo $START | jq -r .upload)/$(echo $START | jq -r .uploadId)
 split -b 5242880 -d big.bin part.
-P1=$(curl -s -X PUT $AGENTFS/v1/uploads/$SHA/$ID/1 -H "authorization: Bearer $KEY" --data-binary @part.00 | jq -r .etag)
-P2=$(curl -s -X PUT $AGENTFS/v1/uploads/$SHA/$ID/2 -H "authorization: Bearer $KEY" --data-binary @part.01 | jq -r .etag)
-curl -X POST $AGENTFS/v1/uploads/$SHA/$ID/complete -H "authorization: Bearer $KEY" \
-  -d "{\"path\":\"big.bin\",\"parts\":[{\"partNumber\":1,\"etag\":\"$P1\"},{\"partNumber\":2,\"etag\":\"$P2\"}]}"
+P1=$(curl -s -X PUT $PARTS/1 -H "authorization: Bearer $KEY" --data-binary @part.00 | jq -r .etag)
+P2=$(curl -s -X PUT $PARTS/2 -H "authorization: Bearer $KEY" --data-binary @part.01 | jq -r .etag)
+curl -X POST $PARTS/complete -H "authorization: Bearer $KEY" \
+  -d "{\"path\":\"big.bin\",\"sha256\":\"$SHA\",\"parts\":[{\"partNumber\":1,\"etag\":\"$P1\"},{\"partNumber\":2,\"etag\":\"$P2\"}]}"
 ```
 
 Every part but the last must be the same size and at least 5 MiB. The start answer suggests
-`partBytes`, 90 MiB. An upload holds up to 10,000 parts.
+`partBytes`, 90 MiB. An upload holds up to 10,000 parts. If the stored bytes do not add up
+to the `size` and `sha256` you started with, complete returns `upload_incomplete` and nothing
+is saved.
 
 ## List files
 
