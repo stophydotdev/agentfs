@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { statSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { basename, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 export type Local = { file: string; path: string };
 
@@ -10,14 +10,27 @@ const SECRET =
 
 const looksSecret = (path: string) => SECRET.test(path);
 
+const isIgnored = (folder: string) => {
+  const full = resolve(folder);
+  try {
+    execFileSync("git", ["-C", dirname(full), "check-ignore", "-q", basename(full)], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const isFile = (path: string) => statSync(path, { throwIfNoEntry: false })?.isFile() ?? false;
+
 const gitFiles = (folder: string) => {
+  if (isIgnored(folder)) return null;
   try {
     const listed = execFileSync(
       "git",
       ["-C", folder, "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
       { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     );
-    return listed.split("\0").filter((file) => file !== "" && existsSync(join(folder, file)));
+    return listed.split("\0").filter((file) => file !== "" && isFile(join(folder, file)));
   } catch {
     return null;
   }

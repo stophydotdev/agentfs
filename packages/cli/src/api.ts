@@ -41,7 +41,7 @@ const limits = z.object({
   maxBatchFiles: z.number(),
   parallelUploads: z.number(),
 });
-const started = z.object({ uploadId: z.string(), partBytes: z.number() });
+const started = z.object({ upload: z.string(), uploadId: z.string(), partBytes: z.number() });
 const part = z.object({ partNumber: z.number(), etag: z.string() });
 const forked = z.object({ from: z.string(), to: z.string(), copied: z.number() });
 const claimLink = z.object({ url: z.string(), expiresAt: z.string() });
@@ -106,11 +106,12 @@ export const connect = async () => {
     headers: { ...headers, "content-type": "application/json" },
   });
   const post = (path: string, body: string) => send(path, withJson("POST", body));
-  const uploadPath = (sha256: string, uploadId: string) =>
-    `/v1/uploads/${sha256}/${encodeURIComponent(uploadId)}`;
+  const uploadPath = (upload: string, uploadId: string) =>
+    `/v1/uploads/${upload}/${encodeURIComponent(uploadId)}`;
   return {
     key,
     source,
+    account: key.slice("afs_".length).split(".")[0] ?? "",
     list: async (prefix: string) => {
       const files: RemoteFile[] = [];
       let cursor = "";
@@ -130,15 +131,20 @@ export const connect = async () => {
     },
     startUpload: async (file: Wanted) =>
       started.parse(await (await post("/v1/uploads", JSON.stringify(file))).json()),
-    uploadPart: async (sha256: string, uploadId: string, partNumber: number, body: Blob) =>
+    uploadPart: async (upload: string, uploadId: string, partNumber: number, body: Blob) =>
       part.parse(
         await (
-          await send(`${uploadPath(sha256, uploadId)}/${partNumber}`, { method: "PUT", body, headers })
+          await send(`${uploadPath(upload, uploadId)}/${partNumber}`, { method: "PUT", body, headers })
         ).json(),
       ),
-    completeUpload: async (sha256: string, uploadId: string, path: string, parts: Part[]) =>
+    completeUpload: async (upload: string, uploadId: string, file: Wanted, parts: Part[]) =>
       uploaded.parse(
-        await (await post(`${uploadPath(sha256, uploadId)}/complete`, JSON.stringify({ path, parts }))).json(),
+        await (
+          await post(
+            `${uploadPath(upload, uploadId)}/complete`,
+            JSON.stringify({ path: file.path, sha256: file.sha256, parts }),
+          )
+        ).json(),
       ),
     remove: async (path: string) => {
       await send(`/v1/files/${segments(path)}`, { method: "DELETE", headers });

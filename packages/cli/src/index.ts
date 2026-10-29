@@ -35,9 +35,7 @@ const MIN_ARGS = new Map([
   ["feedback", 1],
 ]);
 
-const { positionals, values } = parseArgs({
-  allowPositionals: true,
-  options: {
+const OPTIONS = {
     to: { type: "string", default: "" },
     by: { type: "string", default: "" },
     cap: { type: "string" },
@@ -45,8 +43,17 @@ const { positionals, values } = parseArgs({
     "include-secrets": { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
     version: { type: "boolean", short: "v", default: false },
-  },
-});
+} as const;
+
+const parsed = (() => {
+  try {
+    return parseArgs({ allowPositionals: true, options: OPTIONS });
+  } catch (error) {
+    process.stderr.write(`error: ${error instanceof Error ? error.message : String(error)}\n\n${USAGE}`);
+    process.exit(1);
+  }
+})();
+const { positionals, values } = parsed;
 
 const print = (line: string) => process.stdout.write(`${line}\n`);
 

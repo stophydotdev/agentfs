@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -75,15 +75,25 @@ const server = Bun.serve({
         parallelUploads: 32,
       }),
     "/v1/uploads": {
-      POST: () => Response.json({ uploadId: "upload-1", partBytes: PART_BYTES }, { status: 201 }),
+      POST: () =>
+        Response.json(
+          { upload: crypto.randomUUID(), uploadId: "upload-1", partBytes: PART_BYTES },
+          { status: 201 },
+        ),
     },
     "/v1/uploads/*": async (request) => {
-      const [sha256 = "", , last = ""] = new URL(request.url).pathname.split("/").slice(3);
+      const [, uploadId = "", last = ""] = new URL(request.url).pathname.split("/").slice(3);
+      if (uploadId === "stale") {
+        const error = { code: "upload_failed", message: "gone", retryAfter: null };
+        return Response.json({ error }, { status: 409 });
+      }
       if (last !== "complete") {
         parts.set(Number(last), await request.arrayBuffer());
         return Response.json({ partNumber: Number(last), etag: `etag-${last}` });
       }
-      const { path } = z.object({ path: z.string() }).parse(await request.json());
+      const { path, sha256 } = z
+        .object({ path: z.string(), sha256: z.string() })
+        .parse(await request.json());
       const ordered = Array.from(parts).toSorted(([a], [b]) => a - b);
       blobs.set(sha256, await new Blob(ordered.map(([, bytes]) => bytes)).arrayBuffer());
       files.set(path, sha256);
@@ -186,4 +196,26 @@ test("a file bigger than one request goes up in parts and comes back whole", asy
   const into = await mkdtemp(join(tmpdir(), "agentfs-pull-"));
   await agentfs("pull", "large", into);
   expect(await readFile(join(into, "large", "data.txt"), "utf8")).toBe(body);
+});
+
+test("a folder that .gitignore ignores is still uploaded when you name it", async () => {
+  uploads.length = 0;
+  const repo = await makeFolder("site", { ".gitignore": "dist/\n", "dist/index.html": "<h1>built</h1>" });
+  Bun.spawnSync(["git", "init", "-q", repo]);
+  await agentfs("put", join(repo, "dist"));
+  expect(uploads).toEqual(["dist/index.html"]);
+});
+
+test("a resume state for an upload the server no longer has starts a new upload", async () => {
+  parts.clear();
+  const body = "this one resumes from a stale state";
+  const folder = await makeFolder("stale", { "data.txt": body });
+  const sha256 = new Bun.CryptoHasher("sha256").update(body).digest("hex");
+  const state = { upload: crypto.randomUUID(), uploadId: "stale", partBytes: PART_BYTES, done: [] };
+  await mkdir(join(config, "agentfs-next", "uploads"), { recursive: true });
+  await writeFile(join(config, "agentfs-next", "uploads", `test-${sha256}.json`), JSON.stringify(state));
+
+  const result = await agentfs("put", folder);
+  expect(result.stderr).toContain("1 uploaded");
+  expect(await readdir(join(config, "agentfs-next", "uploads"))).toEqual([]);
 });
