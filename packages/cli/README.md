@@ -1,58 +1,54 @@
-# agentfs
+# agentfs CLI
 
-Cloud storage for AI agents. Upload a file, get a link.
-
-## Get started
+Upload files from the terminal or from an agent, and get links anyone can open.
 
 ```bash
-npx -y @agentfs/cli@latest init --all --browser
+npx -y @agentfs/cli put ./report --to runs/42
 ```
 
-This installs the CLI, logs you in, and teaches your AI agents to use AgentFS.
-
-Only want the agent skill?
-
-```bash
-npx skills add stophydotdev/agentfs
+```text
+Signed up. Your key is in ~/.config/agentfs-next/key
+https://agentfs.cloud/7d15d3b6da0bb24edce25579533f7ce3/runs/42/report/index.html
+https://agentfs.cloud/7d15d3b6da0bb24edce25579533f7ce3/runs/42/report/img/chart.png
+2 uploaded in 0.23s
 ```
 
-## Use it
-
-```bash
-agentfs upload report.pdf                      # get a link
-agentfs upload data.csv --visibility private   # keep it private
-agentfs share <id> --expires-in 1h             # link that expires
-agentfs ls                                     # your files
-agentfs download <id>                          # get a file back
-```
-
-Or ask your agent: "Upload report.pdf and give me a link."
+The first run signs up and saves a key. Run the same command after a change and only the
+changed files are sent. Each file keeps its link.
 
 ## Commands
 
-| Command | |
-| --- | --- |
-| `init` | Set up everything in one go |
-| `login` / `logout` | Log in with your browser, or log out |
-| `status` | Show your account |
-| `upload <file...>` | Upload files and get links |
-| `ls` | List your files |
-| `get <id>` | Show one file |
-| `download <id>` | Download a file |
-| `share <id>` | Link to a private file |
-| `mv <id> <name>` | Rename a file |
-| `rm <id...>` | Delete files |
-| `projects` | List or create projects |
-| `config` | Show where your login is saved |
-| `setup` | Add AgentFS to your AI agents |
+| Command | What it does |
+|---|---|
+| `put <file or folder>... [--to folder]` | Upload. Unchanged files and bytes the account already has are not sent. |
+| `pull <folder> [into]` | Download a folder. Files you already have are skipped. |
+| `ls [prefix] [--by agent]` | List files with their size, agent, commit and link. |
+| `rm <path>...` | Delete files. Their links stop working. |
+| `fork <folder> <new folder>` | Copy a folder without sending any bytes. |
+| `limits [--cap 5GB]` | Show usage and limits, or set a storage cap. |
+| `claim` | Print a link. The person who opens it signs in with GitHub and keeps the files. |
+| `key rotate` | Replace your key. The old one stops working at once. |
+| `mcp` | Print the MCP config for agents that cannot run commands. |
+| `feedback <message>` | Tell the agentfs team what failed or was slow. |
 
-`upload` also works before `login`, for a quick share: files up to 100 MB, unlisted, with links that expire in 24 hours. Log in to keep files.
+Add `--json` to any command for one JSON object per line.
 
-Logged in, files over 16 MB go up in parts, six at a time, and each part retries on its own. If an upload stops, run the same command again: it picks up where it left off.
+## What put skips
 
-Run `agentfs <command> --help` for options. Add `--json` to any command for JSON output.
+In a git repo, `put` uploads only what git tracks or would track, so `.gitignore` applies.
+It also skips `.env` files, `*.pem` and `*.key` files and SSH keys, and says which ones.
+Add `--include-secrets` to upload them anyway.
 
-## Links
+## Limits
 
-- [agentfs.cloud](https://agentfs.cloud)
-- [Docs](https://docs.agentfs.cloud)
+Each account holds 10 GB. A file up to 90 MiB goes up in one request. Bigger files go up in
+parts, in parallel, up to 879 GiB, and an interrupted upload resumes where it stopped.
+Files of an unclaimed account are deleted 24 hours after the first upload. `agentfs limits`
+shows the exact numbers and the deadline.
+
+## Keys
+
+The key lives in `~/.config/agentfs-next/key`. In CI or a cloud VM, set `AGENTFS_KEY`
+instead. Every upload records which agent made it (Claude Code, Codex, Cursor, Gemini CLI or
+OpenCode) and the git commit, if there is one. Set `AGENTFS_AGENT` to name the agent
+yourself.
