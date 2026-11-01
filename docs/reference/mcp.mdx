@@ -12,27 +12,14 @@ agentfs mcp
 | Tool | What it does |
 |---|---|
 | `upload_file` | Saves text or base64 bytes at a path and returns a link. |
+| `read_file` | Reads a file as text, or as base64 when it is not text. Up to 128 KB. |
 | `list_files` | Lists files under a folder, with their links. |
-| `file_info` | Reads one file's details. |
-| `move_files` | Moves a file or a folder. |
-| `delete_file` | Deletes a file. |
-| `delete_folder` | Deletes a folder. |
-| `undelete_file` | Brings back a file deleted in the last 7 days. |
-| `fork_folder` | Copies a folder without moving bytes. |
+| `delete_file` | Deletes a file, or a whole folder when the path ends in `/`. |
 | `create_snapshot` | Saves a snapshot. |
 | `restore_snapshot` | Makes a folder match a snapshot. |
-| `diff_snapshot` | Compares snapshots. |
-| `timeline` | Lists events, newest first. |
-| `usage` | Adds up usage by agent, session or commit. |
-| `create_key` | Makes a scoped key. |
-| `kv_get` | Reads a value. |
-| `kv_set` | Writes a value. |
-| `kv_delete` | Deletes a value. |
-| `kv_list` | Lists values under a prefix. |
-| `log_tool_call` | Records a tool call. |
-| `get_limits` | Shows usage, the cap and limits. |
-| `send_feedback` | Sends feedback. |
-| `claim_account` | Makes a claim link for a person. |
+| `kv` | Reads a value, or writes one when you pass `value`. |
+
+Seven tools keep the list small, so it costs an agent less context. Moves, forks, the timeline, keys and claim links are in the CLI and the HTTP API.
 
 Writes made over MCP are recorded with the agent `mcp`.
 
