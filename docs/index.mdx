@@ -35,10 +35,19 @@ No signup. The first upload makes an account and saves its key. An account that 
 
 ## Use it from an agent
 
-Install the skill, so your agent knows what to run:
+The install script also adds the agentfs skill to Claude Code, Codex and the other agents on your machine, so they know what to run. To add it by hand:
 
 ```bash
-npx skills add https://docs.agentfs.cloud
+npx skills add stophydotdev/agentfs -g
 ```
+
+Or install the plugin:
+
+| Agent | Command |
+| --- | --- |
+| Claude Code | `/plugin install agentfs --marketplace stophydotdev/agentfs` |
+| Codex | `codex plugin marketplace add stophydotdev/agentfs`, then `codex plugin add agentfs@agentfs` |
+
+T3 Code drives these same agents, so they find the skill there too.
 
 Or connect the MCP server at `https://docs.agentfs.cloud/mcp` to search these docs, and run `agentfs mcp` to print the config for the storage tools.

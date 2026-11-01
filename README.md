@@ -19,6 +19,13 @@ agentfs put ./report
 
 No install: `npx -y @agentfs/cli@latest put ./report`.
 
+The install script also teaches your agents agentfs. To add the skill by hand, run `npx skills add stophydotdev/agentfs -g`. As a plugin:
+
+```bash
+/plugin install agentfs --marketplace stophydotdev/agentfs                         # Claude Code
+codex plugin marketplace add stophydotdev/agentfs && codex plugin add agentfs@agentfs  # Codex
+```
+
 The docs are at https://docs.agentfs.cloud: a quickstart, the concepts, guides for many agents, the CLI, the SDK and the HTTP API.
 
 Switching from Turso's `agentfs-sdk`? Change one import to `@agentfs/sdk`. See [`packages/sdk`](packages/sdk/README.md).
