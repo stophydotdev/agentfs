@@ -36,7 +36,7 @@ const gitFiles = (folder: string) => {
   }
 };
 
-const folderFiles = async (folder: string) => {
+const listFiles = async (folder: string) => {
   const tracked = gitFiles(folder);
   if (tracked !== null) return tracked;
   const entries = await readdir(folder, { recursive: true, withFileTypes: true });
@@ -45,6 +45,9 @@ const folderFiles = async (folder: string) => {
     .map((entry) => relative(folder, join(entry.parentPath, entry.name)).split(sep).join("/"))
     .filter((file) => !file.startsWith(".git/"));
 };
+
+const folderFiles = async (folder: string) =>
+  (await listFiles(folder)).filter((file) => !file.startsWith(".agentfs/"));
 
 export const collect = async (paths: string[], to: string, includeSecrets: boolean) => {
   const folder = to.replace(/^\/+|\/+$/gu, "");

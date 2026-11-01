@@ -1,12 +1,22 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname, relative, resolve } from "node:path";
-import type { Api } from "./api";
+import { type Api, type RemoteFile, clientHeaders } from "./api";
 import { inParallel, sha256Of } from "./local";
 
 export type PullOutcome =
-  | { kind: "downloaded" | "unchanged"; path: string; target: string }
+  | { kind: "downloaded" | "unchanged"; path: string; target: string; size: number }
   | { kind: "failed"; path: string; reason: string };
+
+export const fetchVerified = async (file: RemoteFile) => {
+  const response = await fetch(file.url, { headers: clientHeaders() });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (createHash("sha256").update(bytes).digest("hex") !== file.sha256) {
+    throw new Error("the downloaded bytes do not match the file's sha256");
+  }
+  return bytes;
+};
 
 export const pull = async (api: Api, folder: string, into: string) => {
   const prefix = `${folder.replace(/^\/+|\/+$/gu, "")}/`;
@@ -18,17 +28,12 @@ export const pull = async (api: Api, folder: string, into: string) => {
     }
     try {
       if ((await sha256Of(target).catch(() => null)) === file.sha256) {
-        return { kind: "unchanged", path: file.path, target };
+        return { kind: "unchanged", path: file.path, target, size: file.size };
       }
-      const response = await fetch(file.url);
-      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (createHash("sha256").update(bytes).digest("hex") !== file.sha256) {
-        throw new Error("the downloaded bytes do not match the file's sha256");
-      }
+      const bytes = await fetchVerified(file);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, bytes);
-      return { kind: "downloaded", path: file.path, target };
+      return { kind: "downloaded", path: file.path, target, size: file.size };
     } catch (error) {
       return { kind: "failed", path: file.path, reason: error instanceof Error ? error.message : String(error) };
     }
