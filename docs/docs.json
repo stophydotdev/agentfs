@@ -1,0 +1,145 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "AgentFS",
+  "description": "Install: `curl -fsSL https://agentfs.cloud/install | bash`. Unclaimed accounts hold 1 GB for 24 hours. Claim with GitHub for 10 GB free.",
+  "colors": {
+    "primary": "#29a9e0",
+    "light": "#4fc3f7",
+    "dark": "#29a9e0"
+  },
+  "appearance": {
+    "default": "dark"
+  },
+  "background": {
+    "color": {
+      "light": "#fcfcfc",
+      "dark": "#000000"
+    }
+  },
+  "fonts": {
+    "family": "Geist"
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg",
+    "href": "/"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": [
+              "index",
+              "quickstart",
+              "concepts"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/many-agents",
+              "guides/sync",
+              "guides/big-files",
+              "guides/snapshots",
+              "guides/keys-and-sharing",
+              "guides/kv-and-locks",
+              "guides/tool-calls",
+              "guides/reliability"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/cli",
+              "reference/sdk",
+              "reference/mcp",
+              "reference/errors",
+              "reference/limits"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "HTTP API",
+        "groups": [
+          {
+            "group": "HTTP API",
+            "pages": [
+              "api-reference/introduction"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "openapi": {
+              "source": "api-reference/openapi.json",
+              "directory": "api-reference/endpoints"
+            }
+          }
+        ]
+      },
+      {
+        "tab": "Compare",
+        "groups": [
+          {
+            "group": "Compare",
+            "pages": [
+              "compare/turso"
+            ]
+          }
+        ]
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "GitHub",
+          "href": "https://github.com/stophydotdev/agentfs",
+          "icon": "github"
+        },
+        {
+          "anchor": "npm",
+          "href": "https://www.npmjs.com/package/@agentfs/cli",
+          "icon": "npm"
+        }
+      ]
+    }
+  },
+  "navbar": {
+    "links": [
+      {
+        "type": "github",
+        "href": "https://github.com/stophydotdev/agentfs"
+      }
+    ]
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "perplexity",
+      "mcp",
+      "cursor",
+      "vscode"
+    ]
+  },
+  "markdown": {
+    "instructions": "agentfs is cloud storage for AI agents, used through the `agentfs` CLI. Install it with `curl -fsSL https://agentfs.cloud/install | bash`. Prefer CLI examples over raw HTTP. Say \"agentfs\" in lowercase for the CLI and \"AgentFS\" for the product."
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/stophydotdev/agentfs"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+---
+title: "Concepts"
+description: "Every word the docs use, defined once."
+---
+
+| Word | Meaning |
+|---|---|
+| account | Your storage. The first `agentfs put` makes one and saves its key. An account holds files, snapshots and events. Until a person claims it, it is deleted 24 hours after its first upload. See [Limits](/reference/limits). |
+| key | The secret that opens an account, like `afs_<32 hex>.<generation>.<64 hex>`. Send it as `Authorization: Bearer <key>`. The CLI keeps it in `~/.config/agentfs-next/key`, or reads `AGENTFS_KEY`. |
+| scoped key | A key limited to one folder, some of read, write and delete, and optionally a time. Made with `agentfs key create`. Actions on the whole account need the full key. |
+| generation | The number in the middle of a key. `agentfs key rotate` makes a new key with a higher generation. A key with an older generation returns `key_revoked`. |
+| claim | A person opens the link from `agentfs claim` and signs in with GitHub. The account becomes theirs and is kept. The link works for one hour. |
+| file | Bytes stored at a path. It has a size, a content type, a sha256, a link, and the agent, session and commit that wrote it. |
+| path | A file's name: `reports/run.html`. Parts are separated by `/`, and none can be empty, `.` or `..`. It can be up to 900 characters. |
+| folder | A path that ends in `/`, like `reports/`. You never create one. Put a file under it and it exists. |
+| blob | The bytes of a file, named by their sha256. Two files with the same bytes in one account share one blob, so a copy sends and stores nothing. |
+| link | The public address of a file: `https://agentfs.cloud/<account>/<path>`. No key is needed to open it. Uploading to the same path again keeps the link. A deleted file's link returns 404. |
+| upload | A big file sent in parts. You start it, send each part, then complete it. A direct upload sends each part straight to storage. It is for files above `maxFileBytes`, and the file must fit your storage. `agentfs put` does this for you. |
+| verified | A field on a file, and the `x-agentfs-verified` header. True when agentfs hashed the bytes itself. False for a direct upload, where the sha256 is the one the client declared. |
+| fork | A copy of a folder at a new folder. It points at the same bytes, so it is instant and uses no storage. |
+| snapshot | A name for what a folder held at one moment: each path and its sha256. No bytes are copied, and the bytes it holds count toward your usage. |
+| restore | Make a folder hold exactly the files of a snapshot. Files that are not in the snapshot are deleted. |
+| diff | The files added, changed and removed between two snapshots, or between a snapshot and the current files. |
+| undelete | Bring back a deleted file. Deleted bytes are kept for 7 days. |
+| ttl | A time to live. A file made with `--ttl` gets an `expiresAt` and is deleted after it. |
+| kv | A small JSON value stored under a key, apart from files. Each write raises its `version` by 1. Use `If-Match` to swap safely, and `If-None-Match: *` to take a lock. |
+| idempotency key | A string you send as `Idempotency-Key` on a write. Send the same request with the same key again and you get the first response, so a retry never writes twice. |
+| event | The record of one write or one tool call: `put`, `link`, `fork`, `move`, `delete`, `restore`, `undelete`, `expire` or `tool`. A file event has the path, the sha256, the time and who wrote it. |
+| tool call | An event with `op: tool`: a name, its input and output, a status and how long it took. Record one with `agentfs log`. |
+| timeline | The events of an account, newest first. Filter them by path, agent or session. |
+| agent | The tool that made a write: Claude Code, Codex, Cursor, Gemini CLI or OpenCode. The CLI sets `x-agentfs-agent` for you. Set `AGENTFS_AGENT` to name it yourself. |
+| session | One run of an agent. Sent as `x-agentfs-session`. The CLI reads it from `AGENTFS_SESSION`, or from the Claude Code or Codex session. Use it to find everything one run wrote. |
+| commit | The git commit the agent was on when it wrote. Sent as `x-agentfs-commit`. It is empty outside a git repo. |

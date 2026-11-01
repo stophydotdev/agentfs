@@ -1,0 +1,76 @@
+---
+title: "Limits"
+description: "How much an account holds, and the size, count and time limits."
+---
+
+`agentfs limits` shows the numbers for your account. They come from `GET /v1/limits`.
+
+## Storage
+
+| Account | Holds | Kept |
+|---|---|---|
+| Unclaimed (made by an agent, no person yet) | Up to 1 GB | Deleted 24 hours after its first upload |
+| Claimed with GitHub | 10 GB free, counted across all the accounts the person claimed | Until you delete it |
+
+Downloads are fair use. There is nothing above 10 GB yet.
+
+Run `agentfs claim` and give the link to a person to move an account from the first row to the second.
+
+A single file can be up to 5 TB, as long as it fits.
+
+`GET /v1/limits` returns:
+
+| Field | Meaning |
+|---|---|
+| `tier` | `unclaimed` or `free`. |
+| `usedBytes`, `capBytes` | What this account uses, and its cap. |
+| `ownerUsedBytes`, `ownerLimitBytes` | What the person who claimed it uses across all their accounts, and their limit. |
+| `key` | The key you called with: `id`, `scoped`, `prefix`, `permissions` and `expiresAt`. |
+
+When the free 10 GB is full across a person's accounts, writes return 413 `free_storage_full`. A lower cap that you set with `agentfs limits --cap 5GB` returns `storage_cap_reached` when you reach it.
+
+## Files
+
+| Limit | Value |
+|---|---|
+| One `PUT` | `maxFileBytes`, 90 MiB today |
+| Direct upload | Files above `maxFileBytes`, in parts of 525 MiB. At or below `maxFileBytes` it is refused with `invalid_upload`. Presigned URLs last 6 hours. |
+| Upload in parts through the API | Parts of 90 MiB, up to 10,000 parts, about 879 GiB |
+| Path | 900 characters |
+
+## Requests
+
+| Limit | Value |
+|---|---|
+| Files in one batch (`POST /v1/files`) | 1000 |
+| Files in one list page | 1000 |
+| Parallel uploads in the CLI | 32 |
+| Signups | 10 a minute from one address |
+| Feedback | 5 a minute and 30 a day |
+| Events per page | 1000 |
+| Wait for events (`wait`) | 0 to 30 seconds |
+
+## Key-value store and tool calls
+
+| Limit | Value |
+|---|---|
+| kv value | JSON up to 64 KB |
+| kv key | 1 to 512 characters: letters, digits and `_ . : @ / -` |
+| Tool call `input` and `output` | JSON up to 64 KB each |
+
+## Time
+
+| What | For how long |
+|---|---|
+| Unclaimed account | 24 hours after the first upload |
+| Claim link | 1 hour |
+| Deleted file's bytes | 7 days |
+| Idempotency key | 24 hours |
+| Scoped key `ttl` | 60 seconds to 31,536,000 seconds (1 year) |
+
+## Names
+
+| What | Rule |
+|---|---|
+| Snapshot name | 1 to 64 letters, digits, dots, dashes or underscores |
+| Idempotency key | 1 to 128 characters |

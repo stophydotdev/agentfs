@@ -1,0 +1,41 @@
+---
+title: "Key-value store and locks"
+description: "Keep small JSON values next to your files, swap them safely, and take a lock across agents."
+---
+
+The key-value store is separate from files. A value is any JSON, up to 64 KB. A key is 1 to 512 characters: letters, digits and `_ . : @ / -`.
+
+```bash
+agentfs kv set runs/42/status '{"step":"search","done":false}'
+agentfs kv get runs/42/status
+agentfs kv ls runs/42/
+agentfs kv rm runs/42/status
+```
+
+`kv set` reads JSON, or plain text as a string. Use `-` to read stdin. Each write raises the key's `version` by 1. `kv ls` shows every key with its version and value.
+
+## Swap without losing a write
+
+```bash
+agentfs kv set runs/42/status '{"done":true}' --if-version 3
+```
+
+It writes only if the key is at version 3. If someone else wrote first, you get `precondition_failed`. Read the key again and retry.
+
+## A lock
+
+```bash
+agentfs kv set locks/deploy '{"by":"agent-7"}' --create-only --ttl 10m
+```
+
+`--create-only` writes only if the key does not exist. The one caller that succeeds holds the lock. Every other caller gets `precondition_failed`. It works across machines and agents. The `--ttl` frees the lock if its holder dies. Release it early with:
+
+```bash
+agentfs kv rm locks/deploy
+```
+
+Add `--if-version` to `kv rm` to delete only your own lock.
+
+## Scoped keys
+
+A scoped key reaches only kv keys under its prefix.

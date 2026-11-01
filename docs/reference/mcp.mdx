@@ -1,0 +1,41 @@
+---
+title: "MCP tools"
+description: "The storage tools an agent gets from the agentfs MCP server."
+---
+
+For an agent that cannot run commands. Print the config with `agentfs mcp`, or point an MCP client at `<server>/mcp` with `Authorization: Bearer <key>`.
+
+```bash
+agentfs mcp
+```
+
+| Tool | What it does |
+|---|---|
+| `upload_file` | Saves text or base64 bytes at a path and returns a link. |
+| `list_files` | Lists files under a folder, with their links. |
+| `file_info` | Reads one file's details. |
+| `move_files` | Moves a file or a folder. |
+| `delete_file` | Deletes a file. |
+| `delete_folder` | Deletes a folder. |
+| `undelete_file` | Brings back a file deleted in the last 7 days. |
+| `fork_folder` | Copies a folder without moving bytes. |
+| `create_snapshot` | Saves a snapshot. |
+| `restore_snapshot` | Makes a folder match a snapshot. |
+| `diff_snapshot` | Compares snapshots. |
+| `timeline` | Lists events, newest first. |
+| `usage` | Adds up usage by agent, session or commit. |
+| `create_key` | Makes a scoped key. |
+| `kv_get` | Reads a value. |
+| `kv_set` | Writes a value. |
+| `kv_delete` | Deletes a value. |
+| `kv_list` | Lists values under a prefix. |
+| `log_tool_call` | Records a tool call. |
+| `get_limits` | Shows usage, the cap and limits. |
+| `send_feedback` | Sends feedback. |
+| `claim_account` | Makes a claim link for a person. |
+
+Writes made over MCP are recorded with the agent `mcp`.
+
+<Note>
+  These docs have their own MCP server, for searching the docs. It is at the docs site under `/mcp` and is not the storage server.
+</Note>

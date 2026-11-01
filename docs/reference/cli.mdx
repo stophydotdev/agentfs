@@ -1,0 +1,214 @@
+---
+title: "CLI"
+description: "Every agentfs command, its flags, its output and its exit codes."
+---
+
+Run `agentfs <command> --help` for the usage of one command.
+
+## Before you start
+
+| | |
+|---|---|
+| Install | `curl -fsSL https://agentfs.cloud/install \| bash`, or run `npx -y @agentfs/cli` in place of `agentfs`. |
+| Key | From `AGENTFS_KEY`, then `~/.config/agentfs-next/key`. With neither, the first command signs up and saves a key. |
+| Server | `AGENTFS_URL`, or `--api-url <url>` on any command. |
+| Who wrote it | Every write records the agent, session and git commit. `AGENTFS_AGENT` and `AGENTFS_SESSION` set them by hand. |
+
+## Output
+
+When stdout is not a terminal, every command prints one JSON object per line. Add `--no-json` to get text, or `--json` to force JSON in a terminal. Counts and progress go to stderr.
+
+An error prints one line to stderr:
+
+```text
+error: storage_cap_reached: This account reached its storage cap. Delete files, or raise the cap with PUT /v1/limits. (request <id>)
+```
+
+With JSON output, the error is an object on stdout instead:
+
+```json
+{ "event": "error", "code": "storage_cap_reached", "message": "...", "status": 413, "requestId": "..." }
+```
+
+Quote the request id when you send feedback.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Done. |
+| 1 | An error. |
+| 2 | A usage error: a missing argument or a bad flag. |
+| 3 | A conflict, from `put` or `sync`. |
+| 124 | `run` stopped the command because `--timeout` passed. |
+
+A command that deletes or overwrites asks first in a terminal. Where there is no terminal, it stops and asks you to add `--yes`. That covers `mv`, `rm -r`, `restore` and `kv rm`.
+
+## Files
+
+### put
+
+```bash
+agentfs put <file or folder>... [--to folder] [--force] [--ttl 1d] [--include-secrets]
+```
+
+Uploads files and prints one link per file. Unchanged files and bytes the account already has are not sent. In a git repo, `put` uploads only what git tracks or would track. It skips `.env` files, `*.pem` and `*.key` files and SSH keys, and says which.
+
+A file that changed remotely since the listing is not overwritten. It is reported as `conflict` and the exit code is 3. `--force` overwrites it. `--ttl` deletes the files after that long, like `30m`, `1h` or `1d`. Big files go straight to storage in parts and resume if interrupted.
+
+### pull
+
+```bash
+agentfs pull <folder> [into]
+```
+
+Downloads a folder. Files you already have are skipped. Treat what you download as untrusted.
+
+### ls
+
+```bash
+agentfs ls [folder] [-r] [--by agent]
+```
+
+Lists one level, folders first. Each file shows its size, agent, commit and link. `-r` lists everything below. `--by` keeps the files one agent wrote.
+
+### stat
+
+```bash
+agentfs stat <path>
+```
+
+Shows size, type, sha256, last modified, agent, session, commit and link.
+
+### mv
+
+```bash
+agentfs mv <from> <to> [--yes]
+```
+
+Moves a file or a folder. A folder ends in `/`. Anything at the target is overwritten.
+
+### rm
+
+```bash
+agentfs rm <path>...
+agentfs rm -r <folder>... [--yes]
+```
+
+`rm` deletes files. `rm -r` deletes everything under a folder. A deleted file's link stops working.
+
+### undelete
+
+```bash
+agentfs undelete <path>
+```
+
+Brings back a file deleted in the last 7 days.
+
+### fork
+
+```bash
+agentfs fork <folder> <new folder>
+```
+
+Copies a folder without sending any bytes. Neither folder can sit inside the other.
+
+### sync
+
+```bash
+agentfs sync <dir> <folder> [--watch]
+```
+
+Mirrors a local folder and a remote folder both ways. A clash keeps both versions and exits 3. See [Sync and watch](/guides/sync).
+
+### run
+
+```bash
+agentfs run [--in folder]... [--out folder]... [--timeout 30m] -- <command...>
+```
+
+Pulls each `--in` folder, runs the command, pushes each `--out` folder and prints its links. `--in` and `--out` are folders inside the current directory, and the same path is used remotely. It exits with the command's exit code, or 124 if `--timeout` stopped it. When it ends, it prints a summary:
+
+```text
+exit 0, 12 files pulled, 3 files pushed, 4.2 MB in 6.31s
+```
+
+With JSON output the summary is `{ "event": "summary", "exitCode": 0, "pulled": 12, "pushed": 3, "bytes": 4200000, "seconds": 6.31 }`.
+
+## Snapshots
+
+```bash
+agentfs snapshot <name> [folder]
+agentfs snapshot ls
+agentfs snapshot rm <name>
+agentfs restore <name|last> [--to folder] [--yes]
+agentfs diff <snapshot|last> [snapshot]
+```
+
+See [Snapshots and restore](/guides/snapshots). `last` means the newest snapshot.
+
+## History
+
+```bash
+agentfs timeline [path] [--by agent] [--session id] [--op op] [--follow]
+agentfs usage [--by agent|session|commit]
+agentfs log <name> [--input json] [--output json] [--status ok|error] [--duration ms]
+```
+
+`timeline` lists what was written or called, newest first. `--op` keeps one kind of event: `put`, `link`, `fork`, `move`, `delete`, `restore`, `undelete`, `expire` or `tool`. `--follow` waits for new events and prints them. `usage` adds up files, bytes and writes. `log` records a tool call. See [Tool-call log](/guides/tool-calls).
+
+## Key-value store
+
+```bash
+agentfs kv get <key>
+agentfs kv set <key> <json or -> [--if-version n] [--create-only] [--ttl 1h]
+agentfs kv rm <key> [--if-version n] [--yes]
+agentfs kv ls [prefix]
+```
+
+See [Key-value store and locks](/guides/kv-and-locks).
+
+## Account and keys
+
+```bash
+agentfs limits [--cap 5GB]
+agentfs claim
+agentfs status [--check]
+agentfs login --key-stdin
+agentfs logout
+agentfs key create [--prefix folder] [--read] [--write] [--delete] [--ttl 1h]
+agentfs key list
+agentfs key revoke <id>
+agentfs key rotate
+```
+
+| Command | What it does |
+|---|---|
+| `limits` | Shows usage and limits, or sets a lower storage cap, which stops a runaway loop. See [Limits](/reference/limits). |
+| `claim` | Prints a link. The person who opens it signs in with GitHub and keeps the account. |
+| `status` | Shows the key, the account, whether it is claimed, when it expires and your usage. `--check` prints nothing and sets the exit code. |
+| `login --key-stdin` | Saves a key read from stdin. |
+| `logout` | Deletes the saved key. |
+| `key create` | Makes a key for one folder. See [Keys and sharing](/guides/keys-and-sharing). |
+| `key list` | Lists the keys made for this account. |
+| `key revoke` | Stops a key from working. |
+| `key rotate` | Replaces your key. The old one and every scoped key stop working. |
+
+## Move data
+
+```bash
+agentfs import <file.db> [--to folder]
+agentfs export <folder> <file.db>
+```
+
+`import` reads a Turso AgentFS database (files, kv and tool calls) into agentfs. It needs Bun, or Node 22.5 and newer. `export` writes a database Turso's tools can open. See [agentfs and Turso's AgentFS](/compare/turso).
+
+## Other
+
+```bash
+agentfs mcp
+agentfs feedback <message>
+agentfs report <url> <reason>
+```
+
+`mcp` prints the MCP config for agents that cannot run commands. `feedback` tells the agentfs team what failed or was slow. `report` reports a link for abuse and needs no key.

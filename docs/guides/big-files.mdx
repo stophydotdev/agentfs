@@ -1,0 +1,51 @@
+---
+title: "Big files"
+description: "Upload files up to 5 TB straight to storage, and resume an interrupted upload."
+---
+
+`agentfs put` sends a big file for you. It splits the file into parts, sends them straight to storage in parallel, and resumes where it stopped if the upload is interrupted.
+
+```bash
+agentfs put ./dataset.tar --to data
+```
+
+A file up to `maxFileBytes` (90 MiB today) goes up in one request. A bigger file goes up in parts.
+
+## Limits
+
+A file can be up to 5 TB, as long as it fits your storage. See [Limits](/reference/limits).
+
+## Verified
+
+A file uploaded in one request has `verified: true`: agentfs hashed the bytes itself. A direct upload has `verified: false`, because agentfs does not see the bytes. Its sha256 is the one the client declared.
+
+## Without the CLI
+
+A file above `maxFileBytes` goes up this way:
+
+<Steps>
+  <Step title="Start">
+    `POST /v1/uploads` with `"direct": true`. The answer holds `upload`, `uploadId` and `parts`, plus `partBytes` and `partUrls`. The URLs are presigned `PUT` URLs that work for 6 hours.
+  </Step>
+  <Step title="Send the parts">
+    Cut the file into parts of `partBytes` (525 MiB today) and `PUT` each part to its URL with no key. Keep the `ETag` header that storage sends back. Send each ETag as returned, with or without quotes.
+  </Step>
+  <Step title="Get more URLs">
+    Above 1,000 parts, the start answer holds the first 1,000 URLs. Get the next ones with `GET /v1/uploads/{upload}/{uploadId}/parts?from=<partNumber>`. `from` is a 1-based part number, and each answer holds up to 1,000 URLs.
+  </Step>
+  <Step title="Complete">
+    `POST /v1/uploads/{upload}/{uploadId}/complete` with `{ path, sha256, parts }`. The answer is the file. If the stored bytes do not add up to the `size` and `sha256` you started with, you get `upload_incomplete` and nothing is saved.
+  </Step>
+</Steps>
+
+```bash
+START=$(curl -s -X POST $AGENTFS/v1/uploads -H "authorization: Bearer $KEY" \
+  -d "{\"path\":\"huge.bin\",\"sha256\":\"$SHA\",\"size\":$SIZE,\"direct\":true}")
+echo $START | jq '{upload, uploadId, partBytes, urls: (.partUrls | length)}'
+```
+
+Use a direct upload only for files above `maxFileBytes`. At or below it, `POST /v1/uploads` with `"direct": true` is refused with `invalid_upload`, so use `PUT /v1/files/{path}`.
+
+## The fallback route
+
+`POST /v1/uploads` without `direct` sends the parts through the API: `PUT` each part to `/v1/uploads/{upload}/{uploadId}/{part}` with your key. Every part but the last must be the same size and at least 5 MiB. This route holds up to 10,000 parts, about 879 GiB, and that ceiling applies only here.

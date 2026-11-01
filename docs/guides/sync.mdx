@@ -1,0 +1,38 @@
+---
+title: "Sync and watch"
+description: "Mirror a local folder and a remote folder both ways. A clash keeps both versions."
+---
+
+```bash
+agentfs sync ./work runs/42/work
+```
+
+`sync` compares a local folder with a remote folder and brings them level. New and changed files go the way they changed. A file deleted on one side is deleted on the other.
+
+Add `--watch` to keep it running:
+
+```bash
+agentfs sync ./work runs/42/work --watch
+```
+
+It syncs again when a local file changes, and when the remote folder changes. Press Ctrl-C to stop.
+
+## When both sides changed
+
+If a file changed on both sides since the last sync, `sync` keeps both. Your local file stays where it is. The remote version is saved next to it with `.remote` before the extension: `notes.txt` gets `notes.remote.txt`. Look at both, keep what you want, and delete the `.remote` file.
+
+A clash is reported as `conflict`, and the exit code is 3.
+
+## What `sync` leaves behind
+
+`sync` keeps its state in `.agentfs/sync.json` inside the local folder. Delete that folder and the next run treats every file as new.
+
+## Output
+
+Each change prints one line: `pulled`, `pushed`, `deleted-local`, `deleted-remote` or `conflict`, then the path. With JSON output, each line is an object with an `event` field.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | In step. |
+| 1 | An error. |
+| 3 | At least one conflict. |
