@@ -129,6 +129,12 @@ test("ls -r lists everything below the prefix without a delimiter", async () => 
   );
   const json = await agentfs("ls", "-r", "reports", "--json");
   expect(JSON.parse(json.stdout).verified).toBe(false);
+  const piped = await agentfs.piped("ls", "-r", "reports");
+  expect(JSON.parse(piped.stdout)).toEqual({
+    path: "reports/2026/c.txt",
+    size: 2048,
+    url: "https://files.test/reports/2026/c.txt",
+  });
   const result = await agentfs("ls", "-r", "reports");
   expect(result.stdout).toBe("reports/2026/c.txt\t2 KB\t-\t-\thttps://files.test/reports/2026/c.txt\n");
   expect(lastRequest()?.query.get("prefix")).toBe("reports");
