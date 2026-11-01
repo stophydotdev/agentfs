@@ -18,6 +18,8 @@ Run `agentfs <command> --help` for the usage of one command.
 
 When stdout is not a terminal, every command prints one JSON object per line. Add `--no-json` to get text, or `--json` to force JSON in a terminal. Counts and progress go to stderr.
 
+Piped `put` prints `path`, `url` and `status` for each file, and piped `ls` prints `path`, `size` and `url`. That keeps an agent's context small. Add `--json` to get every field: hash, type, agent, session, commit and dates.
+
 An error prints one line to stderr:
 
 ```text

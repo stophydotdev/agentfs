@@ -72,6 +72,7 @@ const USAGE = `agentfs ${version}: upload files and get links
   agentfs report <url> <reason>                  report a file that breaks the rules; no key needed
 
 Output is one JSON object per line when stdout is not a terminal; --no-json forces text, --json forces JSON.
+Piped put and ls print only path, url, and status or size; --json prints every field.
 Exit codes: 1 error, 2 usage error, 3 conflict (put, sync), 124 timeout (run). Also: --api-url url.
 Deleting or overwriting asks first in a terminal; elsewhere add --yes. In a git repo, put skips what .gitignore ignores.
 Files that look like secrets (.env, keys) are skipped unless you add --include-secrets.
@@ -164,6 +165,7 @@ const parsed = (() => {
 const { positionals, values } = parsed;
 if (values["api-url"] !== undefined) process.env.AGENTFS_URL = values["api-url"];
 const json = values["no-json"] ? false : values.json || !process.stdout.isTTY;
+const brief = json && !values.json;
 
 const print = (line: string) => process.stdout.write(`${line}\n`);
 
@@ -188,7 +190,8 @@ const summarize = (started: number, outcomes: { kind: string }[]) => {
 
 const printFile = (file: RemoteFile) => {
   const by = [file.agent ?? "-", file.commit ?? "-"].join("\t");
-  print(json ? JSON.stringify(file) : `${file.path}\t${formatBytes(file.size)}\t${by}\t${file.url}`);
+  if (!json) return print(`${file.path}\t${formatBytes(file.size)}\t${by}\t${file.url}`);
+  print(JSON.stringify(brief ? { path: file.path, size: file.size, url: file.url } : file));
 };
 
 const hasEntries = async (api: Api, prefix: string) => {
@@ -306,7 +309,11 @@ const upload = async (api: Api, args: string[], to: string, ttlSeconds: number |
       process.stderr.write(
         `conflict: ${outcome.path}: changed remotely while uploading, not uploaded. Add --force to overwrite.\n`,
       );
-    } else print(json ? JSON.stringify({ ...outcome.file, status: outcome.kind }) : outcome.file.url);
+    } else if (!json) print(outcome.file.url);
+    else {
+      const { path, url } = outcome.file;
+      print(JSON.stringify({ ...(brief ? { path, url } : outcome.file), status: outcome.kind }));
+    }
   }
   summarize(started, outcomes);
   return outcomes;

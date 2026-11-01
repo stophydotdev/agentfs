@@ -238,6 +238,18 @@ test("a second upload of the same folder sends only the files that changed", asy
   expect(second.stderr).toContain("1 uploaded, 2 unchanged");
 });
 
+test("piped put prints only the path, the link and the status; --json prints every field", async () => {
+  const folder = await makeFolder("brief", { "a.txt": "brief" });
+  const piped = await agentfs.piped("put", folder);
+  expect(JSON.parse(piped.stdout)).toEqual({
+    path: "brief/a.txt",
+    url: new URL("/files/brief/a.txt", server.url).href,
+    status: "uploaded",
+  });
+  const full = await agentfs("put", folder, "--json");
+  expect(JSON.parse(full.stdout)).toMatchObject({ path: "brief/a.txt", sha256: expect.any(String), status: "unchanged" });
+});
+
 test("bytes the account already holds are linked to a new path, not sent again", async () => {
   await agentfs("put", await makeFolder("first", { "data.csv": "a,b\n1,2" }));
   uploads.length = 0;
