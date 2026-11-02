@@ -521,14 +521,14 @@ test("a command with --help prints only its own usage lines, and plain --help pr
   expect(help.stdout).not.toContain("agentfs put");
 });
 
-type KeyInfo = { id: string; scoped: boolean; prefix: string; permissions: string[]; expiresAt: string | null };
+type KeyInfo = { id: string | null; scoped: boolean; prefix: string; permissions: string[]; expiresAt: string | null };
 
 const fullKey: KeyInfo = { id: "key_1", scoped: false, prefix: "", permissions: ["read", "write", "delete"], expiresAt: null };
 
 const limitsBody = (owner: string | null, key: KeyInfo = fullKey) => ({
   key,
   plan: "free",
-  tier: owner === null ? "unclaimed" : "free",
+  tier: owner === null ? "unclaimed" : "claimed",
   ownerUsedBytes: owner === null ? null : 3.2e9,
   ownerLimitBytes: owner === null ? null : 10e9,
   usedBytes: 2048,
@@ -735,12 +735,21 @@ test("rm, key rotate, feedback, claim and the other text-only commands print one
   expect(await readFile(join(dir, "agentfs", "key"), "utf8")).toBe("afs_new.1.x");
 });
 
-test("limits and status show the tier, and free_storage_full prints the server's message", async () => {
+test("limits and status show the plan, and free_storage_full prints the server's message", async () => {
   const run = await freshConfig();
   await run.stdin("afs_acct.1.x\n", "login", "--key-stdin");
-  script.set("GET /v1/limits", () => Response.json(limitsBody("hussein")));
-  expect((await run("limits")).stdout).toContain("tier free: 3.2 GB of 10 GB used across your accounts\n");
-  expect((await run("status")).stdout).toContain("tier free: 3.2 GB of 10 GB used across your accounts\n");
+  script.set("GET /v1/limits", () => Response.json(limitsBody("Hussein")));
+  expect((await run("limits")).stdout).toContain("plan free: 3.2 GB of 10 GB used across your accounts\n");
+  const status = (await run("status")).stdout;
+  expect(status).toContain("plan free: 3.2 GB of 10 GB used across your accounts\n");
+  expect(status).toContain("owner     Hussein\n");
+
+  const pro = { ...limitsBody("Hussein", { ...fullKey, id: null }), plan: "pro", capBytes: null, maxCapBytes: null, ownerLimitBytes: null };
+  script.set("GET /v1/limits", () => Response.json(pro));
+  const unlimited = (await run("limits")).stdout;
+  expect(unlimited).toContain("plan pro: 3.2 GB used across your accounts\n");
+  expect(unlimited).toContain("max cap   no limit on the pro plan\n");
+  expect(JSON.parse((await run("status", "--json")).stdout).keyId).toBeNull();
 
   script.set("GET /v1/limits", () => Response.json({ ...limitsBody(null), maxCapBytes: 1e9 }));
   expect((await run("limits")).stdout).toContain(

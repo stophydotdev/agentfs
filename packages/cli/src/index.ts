@@ -338,12 +338,16 @@ const syncSummary = (started: number, changes: Change[]) => {
   return done.conflicts > 0 ? 3 : 0;
 };
 
+const sizeOf = (bytes: number | null) => (bytes === null ? "no limit" : formatBytes(bytes));
+
 const tierLine = (limits: Awaited<ReturnType<Api["limits"]>>) => {
   if (limits.tier === "unclaimed") {
-    return `tier unclaimed: ${formatBytes(limits.maxCapBytes)} max, deleted 24 hours after the first upload. Run agentfs claim to keep it.`;
+    return `tier unclaimed: ${sizeOf(limits.maxCapBytes)} max, deleted 24 hours after the first upload. Run agentfs claim to keep it.`;
   }
-  if (limits.ownerUsedBytes === null || limits.ownerLimitBytes === null) return "tier free";
-  return `tier free: ${formatBytes(limits.ownerUsedBytes)} of ${formatBytes(limits.ownerLimitBytes)} used across your accounts`;
+  if (limits.ownerUsedBytes === null) return `plan ${limits.plan}`;
+  const used = formatBytes(limits.ownerUsedBytes);
+  const of = limits.ownerLimitBytes === null ? "" : ` of ${formatBytes(limits.ownerLimitBytes)}`;
+  return `plan ${limits.plan}: ${used}${of} used across your accounts`;
 };
 
 const commands = {
@@ -604,9 +608,9 @@ const commands = {
     const limits = values.cap === undefined ? await api.limits() : await api.setCap(parseBytes(values.cap));
     if (json) return print(JSON.stringify(limits));
     print(tierLine(limits));
-    print(`used      ${formatBytes(limits.usedBytes)} of ${formatBytes(limits.capBytes)} (${limits.files} files)`);
-    print(`owner     ${limits.owner === null ? `nobody yet; files expire ${limits.expiresAt ?? "24 hours after the first upload"} unless claimed (agentfs claim)` : `@${limits.owner}`}`);
-    print(`max cap   ${formatBytes(limits.maxCapBytes)} on the ${limits.plan} plan`);
+    print(`used      ${formatBytes(limits.usedBytes)} of ${sizeOf(limits.capBytes)} (${limits.files} files)`);
+    print(`owner     ${limits.owner === null ? `nobody yet; files expire ${limits.expiresAt ?? "24 hours after the first upload"} unless claimed (agentfs claim)` : limits.owner}`);
+    print(`max cap   ${sizeOf(limits.maxCapBytes)} on the ${limits.plan} plan`);
     print(`max file  ${formatBytes(limits.maxFileBytes)} in one request, ${formatBytes(limits.maxMultipartBytes)} in parts`);
     print(`parallel  ${limits.parallelUploads} uploads, ${limits.maxBatchFiles} files per batch`);
   },
@@ -686,9 +690,9 @@ const keyless = {
       `account   ${api.account} (${key.scoped ? `scoped key: ${key.prefix || "everything"}, ${key.permissions.join(",")}` : "full key"})`,
     );
     if (key.expiresAt !== null) print(`key ends  ${key.expiresAt}`);
-    print(`owner     ${limits.owner === null ? "nobody yet; run agentfs claim to keep these files" : `@${limits.owner}`}`);
+    print(`owner     ${limits.owner === null ? "nobody yet; run agentfs claim to keep these files" : limits.owner}`);
     print(`expires   ${limits.expiresAt ?? "never"}`);
-    print(`used      ${formatBytes(limits.usedBytes)} of ${formatBytes(limits.capBytes)} (${limits.files} files)`);
+    print(`used      ${formatBytes(limits.usedBytes)} of ${sizeOf(limits.capBytes)} (${limits.files} files)`);
     print(tierLine(limits));
   },
   login: async () => {
