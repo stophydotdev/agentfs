@@ -275,7 +275,7 @@ describe("opening", () => {
       stub.seen.signups = 0;
       const signed = await AgentFS.open();
       expect(stub.seen.signups).toBe(1);
-      const file = join(config, "agentfs-next", "key");
+      const file = join(config, "agentfs", "key");
       expect(await readFile(file, "utf8")).toBe(signed.key);
       expect((await AgentFS.open()).key).toBe(signed.key);
       expect(stub.seen.signups).toBe(1);

@@ -429,7 +429,7 @@ test("an expired key points to the key file", async () => {
   script.set("GET /v1/limits", () => Response.json({ error }, { status: 401 }));
   const result = await agentfs("limits");
   expect(result.stderr).toBe(
-    `error: key_expired: the key expired (request req_k)\nIf this account expired, delete ${join(config, "agentfs-next", "key")} and run again to sign up.\n`,
+    `error: key_expired: the key expired (request req_k)\nIf this account expired, delete ${join(config, "agentfs", "key")} and run again to sign up.\n`,
   );
 });
 
@@ -622,9 +622,9 @@ test("login saves a key read from stdin after one validating call, and logout de
   expect(refused.code).toBe(2);
 
   const result = await run.stdin("afs_acct.1.x\n", "login", "--key-stdin");
-  expect(result.stdout).toBe(`logged in as acct; the key is in ${join(dir, "agentfs-next", "key")}\n`);
+  expect(result.stdout).toBe(`logged in as acct; the key is in ${join(dir, "agentfs", "key")}\n`);
   expect(seen.filter(({ path }) => path === "/v1/limits").map(({ headers }) => headers.get("authorization"))).toEqual(["Bearer afs_acct.1.x"]);
-  expect(await readFile(join(dir, "agentfs-next", "key"), "utf8")).toBe("afs_acct.1.x");
+  expect(await readFile(join(dir, "agentfs", "key"), "utf8")).toBe("afs_acct.1.x");
 
   expect((await run("logout")).stdout).toBe("logged out\n");
   expect((await run("status", "--check")).code).toBe(1);
@@ -731,8 +731,8 @@ test("rm, key rotate, feedback, claim and the other text-only commands print one
   const run = runner(server, dir);
   await run.stdin("afs_acct.1.x\n", "login", "--key-stdin");
   const rotated = await run.piped("key", "rotate");
-  expect(rotated.stdout).toBe(`{"rotated":true,"saved":true,"file":"${join(dir, "agentfs-next", "key")}"}\n`);
-  expect(await readFile(join(dir, "agentfs-next", "key"), "utf8")).toBe("afs_new.1.x");
+  expect(rotated.stdout).toBe(`{"rotated":true,"saved":true,"file":"${join(dir, "agentfs", "key")}"}\n`);
+  expect(await readFile(join(dir, "agentfs", "key"), "utf8")).toBe("afs_new.1.x");
 });
 
 test("limits and status show the tier, and free_storage_full prints the server's message", async () => {
