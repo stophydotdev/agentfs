@@ -39,7 +39,7 @@ const agent = await AgentFS.open({ key, url, prefix: "runs/42/" });
 | Option | Default |
 |---|---|
 | `key` | `AGENTFS_KEY`, then the key file of the agentfs CLI, then a new account (the key is saved to that file). |
-| `url` | `AGENTFS_URL`, then `http://127.0.0.1:8787`. |
+| `url` | `AGENTFS_URL`, then `https://agentfs.cloud`. |
 | `prefix` | `""`. A folder that roots every path: with `prefix: "runs/42/"`, `/a.txt` is `runs/42/a.txt`. |
 | `id` | Same as `prefix`, for code written for Turso. `prefix` wins when both are set. |
 | `path` | Accepted and ignored. There is no database file. |

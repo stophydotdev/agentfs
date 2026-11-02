@@ -203,7 +203,7 @@ export class ApiError extends Error {
   }
 }
 
-export const baseUrl = () => (process.env.AGENTFS_URL ?? "http://127.0.0.1:8787").replace(/\/+$/u, "");
+export const baseUrl = () => (process.env.AGENTFS_URL ?? "https://agentfs.cloud").replace(/\/+$/u, "");
 export const configDir = join(
   process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"),
   "agentfs-next",
