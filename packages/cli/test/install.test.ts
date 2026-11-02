@@ -58,7 +58,8 @@ test("with Bun it runs bun add -g, adds the skill, and shows the version and the
   const result = await install({ bun: true, npm: true, node: "22.5.0", agentfs: true, skills: 0 });
   expect(result.code).toBe(0);
   expect(result.calls).toEqual([
-    "bun add -g @agentfs/cli",
+    "node --version",
+    "bun add -g @agentfs/cli@^0.1.0",
     "bun pm bin -g",
     "agentfs --version",
     `bunx --bun ${ADD_SKILL}`,
@@ -71,7 +72,7 @@ test("without Bun it uses npm when Node is 20.12 or newer", async () => {
   expect(result.code).toBe(0);
   expect(result.calls).toEqual([
     "node --version",
-    "npm install -g @agentfs/cli",
+    "npm install -g @agentfs/cli@^0.1.0",
     "npm prefix -g",
     "agentfs --version",
     `npx -y ${ADD_SKILL}`,
@@ -79,19 +80,27 @@ test("without Bun it uses npm when Node is 20.12 or newer", async () => {
   expect(result.stdout).toBe(`0.0.2\n${SKILL}${NEXT}`);
 });
 
-test("with neither Bun nor a new enough Node it names what to install and exits 1", async () => {
-  for (const fakes of [{}, { npm: true }, { npm: true, node: "20.11.9" }, { npm: true, node: "18.19.0" }]) {
-    const result = await install(fakes);
+test("without a new enough Node it names what to install and exits 1, even with Bun", async () => {
+  const fakes = [
+    {},
+    { npm: true },
+    { npm: true, node: "20.11.9" },
+    { npm: true, node: "18.19.0" },
+    { bun: true },
+    { bun: true, node: "18.19.0" },
+  ];
+  for (const fake of fakes) {
+    const result = await install(fake);
     expect(result.code).toBe(1);
     expect(result.stderr).toBe(
-      "agentfs needs Bun (https://bun.sh) or Node 20.12 or newer (https://nodejs.org) to install.\n",
+      "agentfs needs Node 20.12 or newer (https://nodejs.org) to run, and Bun (https://bun.sh) or npm to install.\n",
     );
-    expect(result.calls.some((call) => call.startsWith("npm install"))).toBe(false);
+    expect(result.calls.some((call) => call.startsWith("npm install") || call.startsWith("bun add"))).toBe(false);
   }
 });
 
 test("when agentfs is not on PATH it prints the line to add the global bin directory", async () => {
-  const result = await install({ bun: true });
+  const result = await install({ bun: true, node: "22.5.0" });
   expect(result.code).toBe(0);
   expect(result.stdout).toBe(
     `agentfs is installed but not on your PATH. Add it with: export PATH="/fake/bun/bin:$PATH"\n${NO_SKILL}${NEXT}`,
@@ -99,19 +108,19 @@ test("when agentfs is not on PATH it prints the line to add the global bin direc
 });
 
 test("when the skill cannot be added it prints the command and still exits 0", async () => {
-  const result = await install({ bun: true, agentfs: true, skills: 1 });
+  const result = await install({ bun: true, node: "22.5.0", agentfs: true, skills: 1 });
   expect(result.code).toBe(0);
   expect(result.stdout).toBe(`0.0.2\n${NO_SKILL}${NEXT}`);
 });
 
 test("piped into bash, as curl | bash runs it, the skill step does not eat the rest of the script", async () => {
-  const result = await install({ bun: true, agentfs: true, skills: 0, piped: true });
+  const result = await install({ bun: true, node: "22.5.0", agentfs: true, skills: 0, piped: true });
   expect(result.code).toBe(0);
   expect(result.stdout).toBe(`0.0.2\n${SKILL}${NEXT}`);
 });
 
 test("with no agent in the home folder it skips the skill and prints the command", async () => {
-  const result = await install({ bun: true, agentfs: true, skills: 0, agentHome: false });
+  const result = await install({ bun: true, node: "22.5.0", agentfs: true, skills: 0, agentHome: false });
   expect(result.calls.some((call) => call.startsWith("bunx"))).toBe(false);
   expect(result.stdout).toBe(`0.0.2\n${NO_SKILL}${NEXT}`);
 });

@@ -285,4 +285,15 @@ describe("opening", () => {
       expect((await AgentFS.open({ key: KEY })).url).toBe(stub.url);
     });
   });
+
+  test("the key goes only over HTTPS, or HTTP to localhost and 127.x", async () => {
+    for (const url of ["http://example.com", "http://localhost.evil.com", "http://127.evil.com"]) {
+      const error = await caught(AgentFS.open({ key: KEY, url }));
+      expect(error.message).toBe(
+        `EINVAL: The API URL ${url} is not HTTPS. AgentFS only sends your key over HTTPS, or HTTP to localhost.`,
+      );
+    }
+    expect((await AgentFS.open({ key: KEY, url: "https://agentfs.cloud" })).url).toBe("https://agentfs.cloud");
+    expect((await AgentFS.open({ key: KEY, url: stub.url })).url).toBe(stub.url);
+  });
 });

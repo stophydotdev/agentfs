@@ -44,7 +44,7 @@ The message says what to do next. `retryAfter`, when it is set, is in seconds an
 | `upload_failed` | 409 | This upload failed or no longer exists. Start a new one with POST /v1/uploads. |
 | `length_required` | 411 | Send a Content-Length header. For a stream of unknown length, use POST /v1/uploads. |
 | `precondition_failed` | 412 | The file changed since you read it. List it again, then retry with its current sha256 in If-Match. |
-| `free_storage_full` | 413 | Your free 10 GB is full across your accounts. Delete files to make room. |
+| `free_storage_full` | 413 | Your free 2 GB is full across your accounts. Delete files to make room. |
 | `storage_cap_reached` | 413 | This account reached its storage cap. Delete files, or raise the cap with PUT /v1/limits. |
 | `value_too_large` | 413 | Send at most 64 KB of JSON. |
 | `idempotency_key_reused` | 422 | This Idempotency-Key was used for a different request. Use a new key. |

@@ -1,9 +1,10 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { version } from "../package.json";
 import { attribution } from "./agent";
+import { UsageError } from "./usage-error";
 
 const remoteFile = z.object({
   path: z.string(),
@@ -203,12 +204,25 @@ export class ApiError extends Error {
   }
 }
 
-export const baseUrl = () => (process.env.AGENTFS_URL ?? "https://agentfs.cloud").replace(/\/+$/u, "");
+const isLocalHost = (hostname: string) =>
+  hostname === "localhost" || hostname === "[::1]" || /^127\.\d+\.\d+\.\d+$/u.test(hostname);
+
+/** The server URL. AGENTFS_API_URL is the name 0.0.2 read. The key goes only over HTTPS, or HTTP to localhost. */
+export const baseUrl = () => {
+  const url = (process.env.AGENTFS_URL || process.env.AGENTFS_API_URL || "https://agentfs.cloud").replace(/\/+$/u, "");
+  const parsed = URL.canParse(url) ? new URL(url) : null;
+  if (parsed === null) throw new UsageError(`The API URL ${url} is not a valid URL.`);
+  if (parsed.protocol === "https:" || (parsed.protocol === "http:" && isLocalHost(parsed.hostname))) return url;
+  throw new UsageError(
+    `The API URL ${url} is not HTTPS. AgentFS only sends your key over HTTPS, or HTTP to localhost.`,
+  );
+};
 export const configDir = join(
-  process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"),
+  process.env.XDG_CONFIG_HOME || join(homedir(), ".config"),
   "agentfs",
 );
 export const keyFile = join(configDir, "key");
+const legacyCredentials = join(configDir, "credentials.json");
 
 let command: string | undefined;
 
@@ -297,6 +311,11 @@ export const findKey = async (): Promise<{ key: string; source: KeySource } | nu
 const loadKey = async (given?: { key: string; source: KeySource }) => {
   const found = given ?? (await findKey());
   if (found !== null) return found;
+  if (await access(legacyCredentials).then(() => true, () => false)) {
+    throw new UsageError(
+      `found a 0.0.2 login in ${legacyCredentials}, which this version does not read, and no key. Signing up now would start a new empty account. Get a key for that account from the API keys page of the dashboard on https://agentfs.cloud, then run: agentfs login --key-stdin`,
+    );
+  }
   const { key } = issuedKey.parse(await (await send("/v1/signup", { method: "POST" })).json());
   await saveKey(key);
   process.stderr.write(`Signed up. Your key is in ${keyFile}\n`);

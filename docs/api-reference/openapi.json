@@ -4112,7 +4112,7 @@
     {
       "code": "free_storage_full",
       "status": 413,
-      "message": "Your free 10 GB is full across your accounts. Delete files to make room."
+      "message": "Your free 2 GB is full across your accounts. Delete files to make room."
     },
     {
       "code": "feedback_rate_limited",

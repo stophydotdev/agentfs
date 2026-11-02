@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, expect, test } from "bun:test";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runner, start } from "./cli";
@@ -761,4 +761,66 @@ test("limits and status show the plan, and free_storage_full prints the server's
   const full = await run("undelete", "a.txt");
   expect(full.stderr).toBe("error: free_storage_full: your 10 GB of free storage is full\n");
   expect(full.code).toBe(1);
+});
+
+const withEnv = (env: Record<string, string>, cwd: string, ...args: string[]) => {
+  const child = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "index.ts"), "--no-json", ...args], {
+    cwd,
+    env: { ...process.env, AGENTFS_URL: "", AGENTFS_KEY: "", ...env },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]).then(
+    ([stdout, stderr, code]) => ({ stdout, stderr, code }),
+  );
+};
+
+test("a 0.0.2 login with no key stops instead of signing up a new account", async () => {
+  const home = await mkdtemp(join(tmpdir(), "agentfs-legacy-"));
+  await mkdir(join(home, "agentfs"));
+  await writeFile(join(home, "agentfs", "credentials.json"), '{"apiKey":"afs_old.1.x"}');
+  const result = await withEnv({ XDG_CONFIG_HOME: home, AGENTFS_URL: server.url.href }, home, "kv", "get", "a");
+  expect(result.code).toBe(2);
+  expect(result.stderr).toBe(
+    `error: found a 0.0.2 login in ${join(home, "agentfs", "credentials.json")}, which this version does not read, and no key. Signing up now would start a new empty account. Get a key for that account from the API keys page of the dashboard on https://agentfs.cloud, then run: agentfs login --key-stdin\n`,
+  );
+  expect(seen.map(({ path }) => path)).toEqual([]);
+});
+
+test("AGENTFS_API_URL, the 0.0.2 name, works when AGENTFS_URL is not set", async () => {
+  script.set("GET /v1/limits", () => Response.json(limitsBody(null)));
+  const home = await mkdtemp(join(tmpdir(), "agentfs-alias-"));
+  const result = await withEnv(
+    { XDG_CONFIG_HOME: home, AGENTFS_API_URL: server.url.href, AGENTFS_KEY: "afs_acct.1.x" },
+    home,
+    "limits",
+  );
+  expect(result.code).toBe(0);
+  expect(seen.map(({ path }) => path)).toEqual(["/v1/limits"]);
+});
+
+test("an empty XDG_CONFIG_HOME saves the key under the home folder, not the current folder", async () => {
+  const home = await mkdtemp(join(tmpdir(), "agentfs-home-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agentfs-cwd-"));
+  const result = await withEnv({ XDG_CONFIG_HOME: "", HOME: home, AGENTFS_URL: server.url.href }, cwd, "kv", "get", "a");
+  expect(result.stderr).toContain(`Signed up. Your key is in ${join(home, ".config", "agentfs", "key")}\n`);
+  expect(await readFile(join(home, ".config", "agentfs", "key"), "utf8")).toBe("afs_test.1.x");
+  expect(await Array.fromAsync(new Bun.Glob("**/*").scan({ cwd }))).toEqual([]);
+});
+
+test("the key goes only over HTTPS, or HTTP to localhost and 127.x", async () => {
+  script.set("GET /v1/limits", () => Response.json(limitsBody(null)));
+  const home = await mkdtemp(join(tmpdir(), "agentfs-https-"));
+  const run = (url: string) =>
+    withEnv({ XDG_CONFIG_HOME: home, AGENTFS_URL: url, AGENTFS_KEY: "afs_acct.1.x" }, home, "limits");
+  for (const url of ["http://example.com", "http://localhost.evil.com", "http://127.evil.com"]) {
+    const result = await run(url);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toBe(
+      `error: The API URL ${url} is not HTTPS. AgentFS only sends your key over HTTPS, or HTTP to localhost.\n`,
+    );
+  }
+  expect((await run(`http://127.0.0.1:${server.port}`)).code).toBe(0);
+  expect((await run(`http://localhost:${server.port}`)).code).toBe(0);
 });
