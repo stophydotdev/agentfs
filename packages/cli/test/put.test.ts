@@ -308,12 +308,12 @@ test("a resume state for an upload the server no longer has starts a new upload"
   const folder = await makeFolder("stale", { "data.txt": body });
   const sha256 = new Bun.CryptoHasher("sha256").update(body).digest("hex");
   const state = { upload: crypto.randomUUID(), uploadId: "stale", partBytes: PART_BYTES, direct: true, done: [] };
-  await mkdir(join(config, "agentfs-next", "uploads"), { recursive: true });
-  await writeFile(join(config, "agentfs-next", "uploads", `test-${sha256}.json`), JSON.stringify(state));
+  await mkdir(join(config, "agentfs", "uploads"), { recursive: true });
+  await writeFile(join(config, "agentfs", "uploads", `test-${sha256}.json`), JSON.stringify(state));
 
   const result = await agentfs("put", folder);
   expect(result.stderr).toContain("1 uploaded");
-  expect(await readdir(join(config, "agentfs-next", "uploads"))).toEqual([]);
+  expect(await readdir(join(config, "agentfs", "uploads"))).toEqual([]);
 });
 
 test("put does not overwrite a file that changed remotely, and --force does", async () => {
@@ -439,8 +439,8 @@ test("a resume fetches fresh URLs and sends only the parts that are left", async
       { partNumber: 2, etag: '"etag-2"' },
     ],
   };
-  await mkdir(join(config, "agentfs-next", "uploads"), { recursive: true });
-  await writeFile(join(config, "agentfs-next", "uploads", `test-${sha256}.json`), JSON.stringify(state));
+  await mkdir(join(config, "agentfs", "uploads"), { recursive: true });
+  await writeFile(join(config, "agentfs", "uploads", `test-${sha256}.json`), JSON.stringify(state));
 
   const result = await agentfs("put", folder);
   expect(result.stderr).toContain("1 uploaded");

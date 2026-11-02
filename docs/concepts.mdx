@@ -6,7 +6,7 @@ description: "Every word the docs use, defined once."
 | Word | Meaning |
 |---|---|
 | account | Your storage. The first `agentfs put` makes one and saves its key. An account holds files, snapshots and events. Until a person claims it, it is deleted 24 hours after its first upload. See [Limits](/reference/limits). |
-| key | The secret that opens an account, like `afs_<32 hex>.<generation>.<64 hex>`. Send it as `Authorization: Bearer <key>`. The CLI keeps it in `~/.config/agentfs-next/key`, or reads `AGENTFS_KEY`. |
+| key | The secret that opens an account, like `afs_<32 hex>.<generation>.<64 hex>`. Send it as `Authorization: Bearer <key>`. The CLI keeps it in `~/.config/agentfs/key`, or reads `AGENTFS_KEY`. |
 | scoped key | A key limited to one folder, some of read, write and delete, and optionally a time. Made with `agentfs key create`. Actions on the whole account need the full key. |
 | generation | The number in the middle of a key. `agentfs key rotate` makes a new key with a higher generation. A key with an older generation returns `key_revoked`. |
 | claim | A person opens the link from `agentfs claim` and signs in with GitHub. The account becomes theirs and is kept. The link works for one hour. |

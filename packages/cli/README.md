@@ -10,7 +10,7 @@ agentfs put ./report --to runs/42
 No install: `npx -y @agentfs/cli put ./report --to runs/42`.
 
 ```text
-Signed up. Your key is in ~/.config/agentfs-next/key
+Signed up. Your key is in ~/.config/agentfs/key
 https://agentfs.cloud/7d15d3b6da0bb24edce25579533f7ce3/runs/42/report/index.html
 https://agentfs.cloud/7d15d3b6da0bb24edce25579533f7ce3/runs/42/report/img/chart.png
 2 uploaded in 0.23s
@@ -49,7 +49,7 @@ In a git repo, `put` uploads only what git tracks or would track, so `.gitignore
 
 ## Keys
 
-The key lives in `~/.config/agentfs-next/key`. In CI or a cloud VM, set `AGENTFS_KEY` instead. Every upload records which agent made it (Claude Code, Codex, Cursor, Gemini CLI or OpenCode) and the git commit, if there is one. Set `AGENTFS_AGENT` to name the agent yourself.
+The key lives in `~/.config/agentfs/key`. In CI or a cloud VM, set `AGENTFS_KEY` instead. Every upload records which agent made it (Claude Code, Codex, Cursor, Gemini CLI or OpenCode) and the git commit, if there is one. Set `AGENTFS_AGENT` to name the agent yourself.
 
 ## Docs
 

@@ -6,7 +6,7 @@ description: "Conventions for every endpoint: keys, request ids, conditional wri
 The endpoint pages in this tab come from the server's OpenAPI document, `GET /openapi.json`. This page covers what every endpoint shares.
 
 ```bash
-export AGENTFS=http://127.0.0.1:8787
+export AGENTFS=https://agentfs.cloud
 export KEY=$(curl -s -X POST $AGENTFS/v1/signup | jq -r .key)
 ```
 
