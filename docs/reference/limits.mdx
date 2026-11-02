@@ -10,9 +10,9 @@ description: "How much an account holds, and the size, count and time limits."
 | Account | Holds | Kept |
 |---|---|---|
 | Unclaimed (made by an agent, no person yet) | Up to 1 GB | Deleted 24 hours after its first upload |
-| Claimed with GitHub | 10 GB free, counted across all the accounts the person claimed | Until you delete it |
+| Claimed with GitHub | 2 GB free, counted across all the accounts the person claimed | Until you delete it |
 
-Downloads are fair use. There is nothing above 10 GB yet.
+Downloads of links are limited to 10 GB a month.
 
 Run `agentfs claim` and give the link to a person to move an account from the first row to the second.
 
@@ -27,7 +27,7 @@ A single file can be up to 5 TB, as long as it fits.
 | `ownerUsedBytes`, `ownerLimitBytes` | What the person who claimed it uses across all their accounts, and their limit. |
 | `key` | The key you called with: `id`, `scoped`, `prefix`, `permissions` and `expiresAt`. |
 
-When the free 10 GB is full across a person's accounts, writes return 413 `free_storage_full`. A lower cap that you set with `agentfs limits --cap 5GB` returns `storage_cap_reached` when you reach it.
+When the free 2 GB is full across a person's accounts, writes return 413 `free_storage_full`. A lower cap that you set with `agentfs limits --cap 5GB` returns `storage_cap_reached` when you reach it.
 
 ## Files
 
@@ -37,6 +37,7 @@ When the free 10 GB is full across a person's accounts, writes return 413 `free_
 | Direct upload | Files above `maxFileBytes`, in parts of 525 MiB. At or below `maxFileBytes` it is refused with `invalid_upload`. Presigned URLs last 6 hours. |
 | Upload in parts through the API | Parts of 90 MiB, up to 10,000 parts, about 879 GiB |
 | Path | 900 characters |
+| New files | 50,000 a month |
 
 ## Requests
 

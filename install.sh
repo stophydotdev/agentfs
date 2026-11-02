@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-PACKAGE="@agentfs/cli"
+PACKAGE="@agentfs/cli@^0.1.0"
 
 have() {
   command -v "$1" >/dev/null 2>&1
@@ -20,7 +20,7 @@ node_is_new_enough() {
   [ "$major" -gt 20 ] || { [ "$major" -eq 20 ] && [ "$minor" -ge 12 ]; }
 }
 
-if have bun; then
+if have bun && node_is_new_enough; then
   bun add -g "$PACKAGE"
   bin_dir=$(bun pm bin -g 2>/dev/null) || bin_dir="${BUN_INSTALL:-$HOME/.bun}/bin"
   skills="bunx --bun skills"
@@ -29,7 +29,7 @@ elif have npm && node_is_new_enough; then
   bin_dir="$(npm prefix -g 2>/dev/null)/bin"
   skills="npx -y skills"
 else
-  echo "agentfs needs Bun (https://bun.sh) or Node 20.12 or newer (https://nodejs.org) to install." >&2
+  echo "agentfs needs Node 20.12 or newer (https://nodejs.org) to run, and Bun (https://bun.sh) or npm to install." >&2
   exit 1
 fi
 
