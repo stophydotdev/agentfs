@@ -112,7 +112,7 @@ const limits = z.object({
     expiresAt: z.string().nullable(),
   }),
   plan: z.string(),
-  tier: z.enum(["unclaimed", "claimed"]),
+  tier: z.string(),
   ownerUsedBytes: z.number().nullable(),
   ownerLimitBytes: z.number().nullable(),
   usedBytes: z.number(),
