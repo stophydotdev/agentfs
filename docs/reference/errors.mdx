@@ -1,0 +1,58 @@
+---
+title: "Errors"
+description: "Every error code, its status and what to do."
+---
+
+Every error looks like this:
+
+```json
+{ "error": { "code": "storage_cap_reached", "message": "This account reached its storage cap. Delete files, or raise the cap with PUT /v1/limits.", "retryAfter": null, "requestId": "..." } }
+```
+
+The message says what to do next. `retryAfter`, when it is set, is in seconds and matches the `Retry-After` header. `requestId` is the same as the `x-request-id` header.
+
+| Code | Status | What to do |
+|---|---|---|
+| `claim_link_invalid` | 400 | This claim link is wrong or expired. Ask the agent for a new one: `agentfs claim`. |
+| `invalid_batch` | 400 | Send JSON &#123; files: [&#123; path, sha256, size &#125;] &#125; with at most 1000 files. |
+| `invalid_cap` | 400 | Send JSON &#123; capBytes &#125; between 0 and maxCapBytes from GET /v1/limits. |
+| `invalid_feedback` | 400 | Send JSON &#123; message &#125; with 1 to 2000 characters. |
+| `invalid_fork` | 400 | Send JSON &#123; from, to &#125;: two folders, neither inside the other. |
+| `invalid_idempotency_key` | 400 | Send an Idempotency-Key of 1 to 128 characters. |
+| `invalid_key_request` | 400 | Send JSON &#123; prefix, permissions, ttlSeconds &#125;: a folder ending in / or empty, a non-empty list of read, write or delete, and optionally 60 to 31536000 seconds. |
+| `invalid_kv` | 400 | Use a key of 1 to 512 letters, digits, dots, colons, @, / or -, and send a JSON body. |
+| `invalid_move` | 400 | Send JSON &#123; from, to &#125;: two files, or two folders ending in /, neither inside the other. |
+| `invalid_path` | 400 | Use a relative path like reports/run.html, with no empty, . or .. parts. |
+| `invalid_report` | 400 | Send JSON &#123; url, reason &#125;: the link and why it should come down. |
+| `invalid_sha256` | 400 | Send x-sha256: the file's sha256 as 64 lowercase hex characters, as `sha256sum <file>` prints it. |
+| `invalid_snapshot` | 400 | Send JSON &#123; name, prefix &#125;: a name of 1 to 64 letters, digits, dots, dashes or underscores, and an optional folder. |
+| `invalid_ttl` | 400 | Send a ttl of 60 to 31536000 seconds in x-agentfs-ttl, or ttlSeconds in a batch entry. |
+| `invalid_upload` | 400 | Start with JSON &#123; path, sha256, size &#125;, PUT each part to /v1/uploads/&lt;upload>/&lt;uploadId>/&lt;part>, then POST &#123; path, sha256, parts &#125; to .../complete. |
+| `invalid_usage` | 400 | Send ?by=agent, ?by=session or ?by=commit. |
+| `sha256_mismatch` | 400 | The bytes received do not match x-sha256. Hash the file again and retry. |
+| `upload_incomplete` | 400 | The stored bytes do not match the size or sha256 this upload started with. Upload it again. |
+| `key_expired` | 401 | This key expired. Ask for a new one. |
+| `key_revoked` | 401 | This key was rotated, or its unclaimed account expired. Use your newest key, or sign up again. |
+| `unauthorized` | 401 | Send your key as `Authorization: Bearer <key>`. Get a key from POST /v1/signup. |
+| `key_scope` | 403 | This key can't do that here. Ask for a key with the folder and permission you need. |
+| `not_found` | 404 | Nothing is here. |
+| `snapshot_not_found` | 404 | No snapshot has this name. List them with GET /v1/snapshots. |
+| `already_claimed` | 409 | Someone else already claimed this account. |
+| `file_exists` | 409 | A file is at this path. Move or delete it first. |
+| `idempotency_in_progress` | 409 | A request with this Idempotency-Key is still running. Retry after retryAfter seconds. |
+| `snapshot_exists` | 409 | A snapshot with this name exists. Pick another name, or delete it first. |
+| `upload_failed` | 409 | This upload failed or no longer exists. Start a new one with POST /v1/uploads. |
+| `length_required` | 411 | Send a Content-Length header. For a stream of unknown length, use POST /v1/uploads. |
+| `precondition_failed` | 412 | The file changed since you read it. List it again, then retry with its current sha256 in If-Match. |
+| `free_storage_full` | 413 | Your free 2 GB is full across your accounts. Delete files to make room. |
+| `storage_cap_reached` | 413 | This account reached its storage cap. Delete files, or raise the cap with PUT /v1/limits. |
+| `value_too_large` | 413 | Send at most 64 KB of JSON. |
+| `idempotency_key_reused` | 422 | This Idempotency-Key was used for a different request. Use a new key. |
+| `feedback_rate_limited` | 429 | Too much feedback for now. Send it again after retryAfter seconds. |
+| `report_rate_limited` | 429 | Too many reports from this address. Retry after retryAfter seconds. |
+| `signup_rate_limited` | 429 | Too many signups from this address. Retry after retryAfter seconds. |
+| `taken_down` | 451 | This file was taken down after an abuse report. |
+| `server_error` | 500 | Something failed on our side. Retry, and if it keeps failing, send feedback. |
+| `github_sign_in_failed` | 502 | GitHub sign-in did not finish. Open the claim link again. |
+
+The CLI prints an error as `error: <code>: <message> (request <id>)` and exits 1. See [CLI](/reference/cli).
