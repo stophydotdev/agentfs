@@ -525,19 +525,21 @@ type KeyInfo = { id: string | null; scoped: boolean; prefix: string; permissions
 
 const fullKey: KeyInfo = { id: "key_1", scoped: false, prefix: "", permissions: ["read", "write", "delete"], expiresAt: null };
 
+const GB = 1024 ** 3;
+
 const limitsBody = (owner: string | null, key: KeyInfo = fullKey) => ({
   key,
   plan: "free",
   tier: owner === null ? "unclaimed" : "claimed",
-  ownerUsedBytes: owner === null ? null : 3.2e9,
-  ownerLimitBytes: owner === null ? null : 10e9,
+  ownerUsedBytes: owner === null ? null : 3 * GB,
+  ownerLimitBytes: owner === null ? null : 10 * GB,
   usedBytes: 2048,
   files: 3,
-  capBytes: 5e9,
+  capBytes: 5 * GB,
   owner,
   expiresAt: owner === null ? "2026-11-02T00:00:00.000Z" : null,
-  maxCapBytes: 1e10,
-  maxFileBytes: 1e8,
+  maxCapBytes: 10 * GB,
+  maxFileBytes: 100 * 1024 ** 2,
   maxMultipartBytes: 1e12,
   partBytes: 1e7,
   maxBatchFiles: 1000,
@@ -708,6 +710,7 @@ test("in a terminal the confirmation asks first, and only y goes ahead", async (
 });
 
 test("rm, key rotate, feedback, claim and the other text-only commands print one JSON object in JSON mode", async () => {
+  script.set("HEAD /v1/files/a.txt", () => new Response(null, { headers: HEAD }));
   script.set("DELETE /v1/files/a.txt", () => new Response(null, { status: 204 }));
   expect((await agentfs.piped("rm", "a.txt")).stdout).toBe('{"path":"a.txt","deleted":true}\n');
 
@@ -716,7 +719,7 @@ test("rm, key rotate, feedback, claim and the other text-only commands print one
 
   const link = { url: "https://agentfs.test/claim/abc", expiresAt: "2026-11-02T00:00:00.000Z" };
   script.set("POST /v1/claim", () => Response.json(link));
-  expect(JSON.parse((await agentfs.piped("claim")).stdout)).toEqual(link);
+  expect(JSON.parse((await agentfs.piped("claim")).stdout)).toMatchObject(link);
 
   script.set("DELETE /v1/kv/lock", () => new Response(null, { status: 204 }));
   expect((await agentfs.piped("kv", "rm", "lock", "--if-version", "3")).stdout).toBe('{"key":"lock","deleted":true}\n');
@@ -739,19 +742,21 @@ test("limits and status show the plan, and free_storage_full prints the server's
   const run = await freshConfig();
   await run.stdin("afs_acct.1.x\n", "login", "--key-stdin");
   script.set("GET /v1/limits", () => Response.json(limitsBody("Hussein")));
-  expect((await run("limits")).stdout).toContain("plan free: 3.2 GB of 10 GB used across your accounts\n");
+  const shown = (await run("limits")).stdout;
+  expect(shown).toContain("plan free: 3 GB of 10 GB used across your accounts\n");
+  expect(shown).toContain("max file  100 MB on the free plan\n");
   const status = (await run("status")).stdout;
-  expect(status).toContain("plan free: 3.2 GB of 10 GB used across your accounts\n");
+  expect(status).toContain("plan free: 3 GB of 10 GB used across your accounts\n");
   expect(status).toContain("owner     Hussein\n");
 
   const pro = { ...limitsBody("Hussein", { ...fullKey, id: null }), plan: "pro", capBytes: null, maxCapBytes: null, ownerLimitBytes: null };
   script.set("GET /v1/limits", () => Response.json(pro));
   const unlimited = (await run("limits")).stdout;
-  expect(unlimited).toContain("plan pro: 3.2 GB used across your accounts\n");
+  expect(unlimited).toContain("plan pro: 3 GB used across your accounts\n");
   expect(unlimited).toContain("max cap   no limit on the pro plan\n");
   expect(JSON.parse((await run("status", "--json")).stdout).keyId).toBeNull();
 
-  script.set("GET /v1/limits", () => Response.json({ ...limitsBody(null), maxCapBytes: 1e9 }));
+  script.set("GET /v1/limits", () => Response.json({ ...limitsBody(null), maxCapBytes: GB }));
   expect((await run("limits")).stdout).toContain(
     "tier unclaimed: 1 GB max, deleted 24 hours after the first upload. Run agentfs claim to keep it.\n",
   );
@@ -823,4 +828,97 @@ test("the key goes only over HTTPS, or HTTP to localhost and 127.x", async () =>
   }
   expect((await run(`http://127.0.0.1:${server.port}`)).code).toBe(0);
   expect((await run(`http://localhost:${server.port}`)).code).toBe(0);
+});
+
+test("the command names from 0.0.2 print one line naming the new command, and sign nobody up", async () => {
+  const lines = {
+    upload: "agentfs upload is now agentfs put. Run: agentfs put <file or folder>... [--to folder]",
+    share: "agentfs share is gone: every file from agentfs put has a public link. Run: agentfs put <file>",
+    init: "agentfs init is gone: any command signs you up. To use a key you have, run: agentfs login --key-stdin",
+  };
+  const run = await freshConfig();
+  for (const [name, line] of Object.entries(lines)) {
+    const result = await run(name, "report.html");
+    expect(result.stderr).toBe(`error: ${line}\n`);
+    expect(result.code).toBe(2);
+  }
+  expect(seen).toEqual([]);
+});
+
+test("rm of a file that is not there fails with not_found, whether the server says 204 or 404", async () => {
+  script.set("HEAD /v1/files/old.txt", () => new Response(null, { status: 404 }));
+  script.set("DELETE /v1/files/old.txt", () => new Response(null, { status: 204 }));
+  const old = await agentfs("rm", "old.txt");
+  expect(old.stderr).toBe("error: not_found: no file at old.txt\n");
+  expect(old.stdout).toBe("");
+  expect(old.code).toBe(1);
+  expect(seen.some(({ method }) => method === "DELETE")).toBe(false);
+
+  script.set("HEAD /v1/files/new.txt", () => new Response(null, { headers: HEAD }));
+  const error = { code: "not_found", message: "Nothing is here.", retryAfter: null };
+  script.set("DELETE /v1/files/new.txt", () => Response.json({ error }, { status: 404 }));
+  script.set("HEAD /v1/files/here.txt", () => new Response(null, { headers: HEAD }));
+  script.set("DELETE /v1/files/here.txt", () => new Response(null, { status: 204 }));
+  const mixed = await agentfs("rm", "new.txt", "here.txt");
+  expect(mixed.stderr).toBe("error: not_found: no file at new.txt\n");
+  expect(mixed.stdout).toBe("here.txt\n");
+  expect(mixed.code).toBe(1);
+});
+
+test("rm works for a key that can delete but not read", async () => {
+  script.set("HEAD /v1/files/runs/a.txt", () => new Response(null, { status: 403 }));
+  script.set("DELETE /v1/files/runs/a.txt", () => new Response(null, { status: 204 }));
+  const result = await agentfs("rm", "runs/a.txt");
+  expect(result.stdout).toBe("runs/a.txt\n");
+  expect(result.code).toBe(0);
+  script.delete("HEAD /v1/files/runs/a.txt");
+});
+
+test("ls --search sends q, and lists only matching paths even when the server ignores q", async () => {
+  script.set("GET /v1/files", () =>
+    Response.json({
+      files: [file("runs/1/Report.html", null), file("runs/1/data.csv", null), file("runs/2/weekly-report.md", null)],
+      folders: [],
+      cursor: null,
+    }),
+  );
+  const result = await agentfs("ls", "runs", "--search", "report");
+  expect(result.stdout).toBe(
+    "runs/1/Report.html\t2 KB\t-\t-\thttps://files.test/runs/1/Report.html\nruns/2/weekly-report.md\t2 KB\t-\t-\thttps://files.test/runs/2/weekly-report.md\n",
+  );
+  expect(lastRequest()?.query.get("q")).toBe("report");
+  expect(lastRequest()?.query.get("prefix")).toBe("runs/");
+  expect(lastRequest()?.query.has("delimiter")).toBe(false);
+});
+
+test("mcp prints the full key and says so, or makes a key for one folder and says which", async () => {
+  script.set("GET /v1/limits", () => Response.json(limitsBody("hussein")));
+  const run = await freshConfig();
+  await run.stdin("afs_acct.1.full\n", "login", "--key-stdin");
+  const full = await run("mcp");
+  expect(JSON.parse(full.stdout).mcpServers.agentfs.headers.Authorization).toBe("Bearer afs_acct.1.full");
+  expect(full.stderr).toStartWith("key: your full key, which opens every folder and can do everything.");
+
+  const made = { id: "key_7", key: "afs_acct.1.scoped", prefix: "runs/t1/", permissions: ["read", "write"], expiresAt: "2026-11-04T00:00:00.000Z" };
+  script.set("POST /v1/keys", () => Response.json(made, { status: 201 }));
+  const scoped = await run("mcp", "--prefix", "runs/t1", "--ttl", "1d");
+  expect(JSON.parse(lastRequest()?.body ?? "")).toEqual({ prefix: "runs/t1/", permissions: ["read", "write"], ttlSeconds: 86400 });
+  expect(JSON.parse(scoped.stdout).mcpServers.agentfs.headers.Authorization).toBe("Bearer afs_acct.1.scoped");
+  expect(scoped.stdout).not.toContain("afs_acct.1.full");
+  expect(scoped.stderr).toBe("key: a new scoped key, key_7: runs/t1/, read,write, ends 2026-11-04T00:00:00.000Z. Stop it with agentfs key revoke key_7.\n");
+});
+
+test("claim gives the human the link and both deadlines, or the server's message when it sends one", async () => {
+  script.set("GET /v1/limits", () => Response.json(limitsBody(null)));
+  const link = { url: "https://agentfs.test/claim/abc", expiresAt: "2026-11-02T00:00:00.000Z" };
+  script.set("POST /v1/claim", () => Response.json(link));
+  const text = await agentfs("claim");
+  expect(text.stdout).toBe("https://agentfs.test/claim/abc\n");
+  expect(text.stderr).toBe(
+    "Give your person this link:\nhttps://agentfs.test/claim/abc\nThey sign in with GitHub or Google to keep these files. The link works until 2026-11-02T00:00:00.000Z. Files nobody has claimed are deleted at 2026-11-02T00:00:00.000Z.\n",
+  );
+  expect(JSON.parse((await agentfs.piped("claim")).stdout)).toEqual({ ...link, message: text.stderr.trimEnd() });
+
+  script.set("POST /v1/claim", () => Response.json({ ...link, message: "Open the link." }));
+  expect(JSON.parse((await agentfs.piped("claim")).stdout)).toEqual({ ...link, message: "Open the link." });
 });

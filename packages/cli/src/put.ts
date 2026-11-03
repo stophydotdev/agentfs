@@ -4,8 +4,12 @@ import { type Api, ApiError, type LinkEntry, type Precondition, type RemoteFile 
 import { type Local, collect } from "./collect";
 import { inParallel, sha256Of } from "./local";
 import { uploadInParts } from "./parts";
+import { formatBytes } from "./units";
 
 const BATCH = 1000;
+
+/** A file above this many bytes goes up in parts. The server refuses a direct upload at or below it, and it is the same on every plan. */
+const PARTS_ABOVE_BYTES = 90 * 1024 * 1024;
 
 export type PutOutcome =
   | { kind: "uploaded" | "linked" | "unchanged"; file: RemoteFile }
@@ -37,7 +41,7 @@ export const putLocals = async (
   locals: Local[],
   { force, ttlSeconds, expected }: WriteOptions,
 ) => {
-  const [{ maxFileBytes }, hashed] = await Promise.all([
+  const [{ maxFileBytes, plan }, hashed] = await Promise.all([
     api.limits(),
     inParallel(locals, async (local) => ({
       ...local,
@@ -70,6 +74,10 @@ export const putLocals = async (
     if (answer?.status === "over_cap") {
       return { kind: "failed", path: local.path, reason: "storage_cap_reached: see agentfs limits" };
     }
+    if (local.size > maxFileBytes) {
+      const reason = `file_too_large: ${formatBytes(local.size)} is more than the ${formatBytes(maxFileBytes)} one file can be on the ${plan} plan. See agentfs limits.`;
+      return { kind: "failed", path: local.path, reason };
+    }
     try {
       const write = {
         precondition:
@@ -79,7 +87,7 @@ export const putLocals = async (
         ttlSeconds,
       };
       const file =
-        local.size > maxFileBytes
+        local.size > PARTS_ABOVE_BYTES
           ? await uploadInParts(api, local, write)
           : await api.upload(local, await openAsBlob(local.file), write);
       return { kind: file.status, file };

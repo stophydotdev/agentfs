@@ -6,16 +6,18 @@ description: "Every error code, its status and what to do."
 Every error looks like this:
 
 ```json
-{ "error": { "code": "storage_cap_reached", "message": "This account reached its storage cap. Delete files, or raise the cap with PUT /v1/limits.", "retryAfter": null, "requestId": "..." } }
+{ "error": { "code": "not_found", "message": "Nothing is here.", "retryAfter": null, "requestId": "..." } }
 ```
 
-The message says what to do next. `retryAfter`, when it is set, is in seconds and matches the `Retry-After` header. `requestId` is the same as the `x-request-id` header.
+The message says what to do next. The table lists every code the server can return. `retryAfter`, when it is set, is in seconds and matches the `Retry-After` header. `requestId` is the same as the `x-request-id` header.
 
 | Code | Status | What to do |
 |---|---|---|
 | `claim_link_invalid` | 400 | This claim link is wrong or expired. Ask the agent for a new one: `agentfs claim`. |
 | `invalid_batch` | 400 | Send JSON &#123; files: [&#123; path, sha256, size &#125;] &#125; with at most 1000 files. |
+| `invalid_billing_request` | 400 | Billing routes only: send &#123; plan: "pro" &#125; to check out, or &#123; overage_cap_gb &#125; with a whole number of GB or null. |
 | `invalid_cap` | 400 | Send JSON &#123; capBytes &#125; between 0 and maxCapBytes from GET /v1/limits. |
+| `invalid_event` | 400 | Send JSON &#123; op: "tool", name, status, input, output, durationMs, startedAt &#125; with status ok or error, and at most 64 KB each in input and output. |
 | `invalid_feedback` | 400 | Send JSON &#123; message &#125; with 1 to 2000 characters. |
 | `invalid_fork` | 400 | Send JSON &#123; from, to &#125;: two folders, neither inside the other. |
 | `invalid_idempotency_key` | 400 | Send an Idempotency-Key of 1 to 128 characters. |
@@ -25,34 +27,45 @@ The message says what to do next. `retryAfter`, when it is set, is in seconds an
 | `invalid_path` | 400 | Use a relative path like reports/run.html, with no empty, . or .. parts. |
 | `invalid_report` | 400 | Send JSON &#123; url, reason &#125;: the link and why it should come down. |
 | `invalid_sha256` | 400 | Send x-sha256: the file's sha256 as 64 lowercase hex characters, as `sha256sum <file>` prints it. |
+| `invalid_signature` | 400 | Billing routes only: the signature header does not match the request. |
 | `invalid_snapshot` | 400 | Send JSON &#123; name, prefix &#125;: a name of 1 to 64 letters, digits, dots, dashes or underscores, and an optional folder. |
 | `invalid_ttl` | 400 | Send a ttl of 60 to 31536000 seconds in x-agentfs-ttl, or ttlSeconds in a batch entry. |
 | `invalid_upload` | 400 | Start with JSON &#123; path, sha256, size &#125;, PUT each part to /v1/uploads/&lt;upload>/&lt;uploadId>/&lt;part>, then POST &#123; path, sha256, parts &#125; to .../complete. |
 | `invalid_usage` | 400 | Send ?by=agent, ?by=session or ?by=commit. |
+| `plan_unavailable` | 400 | Billing routes only: Pro is not offered yet. |
 | `sha256_mismatch` | 400 | The bytes received do not match x-sha256. Hash the file again and retry. |
 | `upload_incomplete` | 400 | The stored bytes do not match the size or sha256 this upload started with. Upload it again. |
 | `key_expired` | 401 | This key expired. Ask for a new one. |
 | `key_revoked` | 401 | This key was rotated, or its unclaimed account expired. Use your newest key, or sign up again. |
+| `sign_in_required` | 401 | This route uses a signed-in session, not an agent key. Sign in first. |
 | `unauthorized` | 401 | Send your key as `Authorization: Bearer <key>`. Get a key from POST /v1/signup. |
 | `key_scope` | 403 | This key can't do that here. Ask for a key with the folder and permission you need. |
+| `billing_customer_not_found` | 404 | Billing routes only: there is no billing account yet. Start one with a checkout. |
 | `not_found` | 404 | Nothing is here. |
 | `snapshot_not_found` | 404 | No snapshot has this name. List them with GET /v1/snapshots. |
+| `subscription_not_found` | 404 | Billing routes only: there is no subscription to change. |
 | `already_claimed` | 409 | Someone else already claimed this account. |
 | `file_exists` | 409 | A file is at this path. Move or delete it first. |
 | `idempotency_in_progress` | 409 | A request with this Idempotency-Key is still running. Retry after retryAfter seconds. |
 | `snapshot_exists` | 409 | A snapshot with this name exists. Pick another name, or delete it first. |
+| `subscription_exists` | 409 | Billing routes only: you already have a subscription. Change it from the billing portal. |
 | `upload_failed` | 409 | This upload failed or no longer exists. Start a new one with POST /v1/uploads. |
 | `length_required` | 411 | Send a Content-Length header. For a stream of unknown length, use POST /v1/uploads. |
 | `precondition_failed` | 412 | The file changed since you read it. List it again, then retry with its current sha256 in If-Match. |
-| `free_storage_full` | 413 | Your free 2 GB is full across your accounts. Delete files to make room. |
-| `storage_cap_reached` | 413 | This account reached its storage cap. Delete files, or raise the cap with PUT /v1/limits. |
+| `file_too_large` | 413 | This file is bigger than your plan takes. See [Limits](/reference/limits) for the biggest file on each plan. |
+| `free_storage_full` | 413 | Your Free storage is full across your accounts. Delete files, or move to Pro. See [Limits](/reference/limits). |
+| `storage_cap_reached` | 413 | This account is full, or you set a lower cap with `PUT /v1/limits`. Delete files, claim the account, or move to Pro. See [Limits](/reference/limits). |
+| `storage_full` | 413 | Your Pro storage plus the spend cap you set is full. Delete files, or raise the cap on the billing page. |
 | `value_too_large` | 413 | Send at most 64 KB of JSON. |
 | `idempotency_key_reused` | 422 | This Idempotency-Key was used for a different request. Use a new key. |
 | `feedback_rate_limited` | 429 | Too much feedback for now. Send it again after retryAfter seconds. |
+| `link_downloads_full` | 429 | The owner of this link used the month's link downloads that Free and unclaimed accounts get. The link works again on the 1st (UTC). Pro has no limit. |
+| `monthly_files_full` | 429 | This month's new files are used up on a Free or unclaimed plan. Overwriting a file still works. The count starts again on the 1st (UTC). Claim the account, or move to Pro. See [Limits](/reference/limits). |
+| `pro_monthly_files_full` | 429 | This month's new files are used up on Pro, which has a fair-use limit. Overwriting a file still works. The count starts again on the 1st (UTC). If you need more, send feedback. |
 | `report_rate_limited` | 429 | Too many reports from this address. Retry after retryAfter seconds. |
 | `signup_rate_limited` | 429 | Too many signups from this address. Retry after retryAfter seconds. |
 | `taken_down` | 451 | This file was taken down after an abuse report. |
 | `server_error` | 500 | Something failed on our side. Retry, and if it keeps failing, send feedback. |
-| `github_sign_in_failed` | 502 | GitHub sign-in did not finish. Open the claim link again. |
+| `github_sign_in_failed` | 502 | Sign-in did not finish. Open the claim link again. |
 
 The CLI prints an error as `error: <code>: <message> (request <id>)` and exits 1. See [CLI](/reference/cli).

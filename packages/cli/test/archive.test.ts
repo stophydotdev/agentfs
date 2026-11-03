@@ -232,7 +232,7 @@ test("import brings in the files, kv entries and tool calls of a Turso AgentFS d
   const fake = serve({ files: {}, kv: {} });
   const result = await (await cli(fake))("import", file);
 
-  expect(result.stdout).toBe("files       2 (5 KB)\nkv entries  2\ntool calls  2\nskipped     1\n");
+  expect(result.stdout).toBe("files       2 (4.9 KB)\nkv entries  2\ntool calls  2\nskipped     1\n");
   expect(result.stderr).toContain("skipped: link (symlink)\n");
   expect(result.code).toBe(0);
   expect(text(fake.files.get("fixture/docs/a.txt"))).toBe("a".repeat(4096) + "b".repeat(904));
@@ -272,7 +272,7 @@ test("export writes a database in Turso's schema from a folder and the kv entrie
   const file = join(await workDir(), "reports.db");
   const run = await cli(serve(reports));
   const result = await run("export", "reports", file);
-  expect(result.stdout).toBe(`2 files (5 KB) and 1 kv entries written to ${file}\n`);
+  expect(result.stdout).toBe(`2 files (4.9 KB) and 1 kv entries written to ${file}\n`);
 
   const db = new Database(file, { readonly: true });
   expect(db.query("SELECT value FROM fs_config WHERE key = 'chunk_size'").all()).toEqual([{ value: "4096" }]);

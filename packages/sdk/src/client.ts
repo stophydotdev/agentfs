@@ -72,8 +72,6 @@ const json = (method: string, value: unknown): Init => ({
 });
 
 export class Client {
-  private limitsRead: Promise<number> | null = null;
-
   constructor(
     readonly url: string,
     readonly key: string,
@@ -173,11 +171,6 @@ export class Client {
 
   async limits() {
     return readLimits(await this.read("/v1/limits"));
-  }
-
-  maxFileBytes() {
-    this.limitsRead ??= this.limits().then((limits) => limits.maxFileBytes);
-    return this.limitsRead;
   }
 
   async bytesAt(url: string, range?: { start: number; end: number }): Promise<Uint8Array> {

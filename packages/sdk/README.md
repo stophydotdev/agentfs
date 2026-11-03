@@ -52,7 +52,7 @@ Every request carries `User-Agent: agentfs-sdk/<version>`, except in browsers, w
 
 - `mkdir` succeeds and sends nothing. Folders exist when a file is under them.
 - `copyFile` links the same bytes. Nothing is uploaded again.
-- A write above `maxFileBytes` (read once from `GET /v1/limits`) goes straight to storage in parts. The file can be up to 5 TB if it fits the account's cap.
+- A big write goes straight to storage in parts, on every plan. The biggest file depends on the plan, and a bigger one fails with `file_too_large`. See https://docs.agentfs.cloud/reference/limits.
 - `readFile(path)` returns a `Buffer`. Where there is no `Buffer`, pass an encoding, or call `readBytes(path)` for a `Uint8Array`.
 - `open(path)` gives a handle. `pread` reads a byte range. `pwrite` and `truncate` rewrite the whole file.
 - `symlink` and `readlink` throw `ENOSYS`.

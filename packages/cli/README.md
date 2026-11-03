@@ -18,7 +18,7 @@ https://agentfs.cloud/7d15d3b6da0bb24edce25579533f7ce3/runs/42/report/img/chart.
 
 The first run signs up and saves a key. Run the same command after a change and only the changed files are sent. Each file keeps its link.
 
-Unclaimed accounts hold 1 GB for 24 hours. Run `agentfs claim` and give the link to a person: they sign in with GitHub and get 2 GB free.
+Unclaimed accounts hold 1 GB for 24 hours. Run `agentfs claim` and give the link to a person: they sign in with GitHub or Google and get 2 GB free.
 
 ## Commands
 

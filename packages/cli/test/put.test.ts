@@ -1,5 +1,5 @@
-import { afterAll, expect, test } from "bun:test";
-import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { afterAll, afterEach, expect, test } from "bun:test";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -18,7 +18,18 @@ const wanted = z.object({
   ),
 });
 
-const PART_BYTES = 16;
+const MB = 1024 * 1024;
+const PART_BYTES = 32 * MB;
+// The CLI sends a file in parts above 90 MB, whatever the plan. This one is the first size that does.
+const BIG_BYTES = 90 * MB + 1;
+const plan = { name: "pro", maxFileBytes: 5 * 1024 * 1024 * MB };
+
+const bigBody = (tag: string, size = BIG_BYTES) => {
+  const bytes = Buffer.alloc(size);
+  bytes.write(tag);
+  return bytes;
+};
+const sha256Of = (bytes: Uint8Array) => new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
 
 const blobs = new Map<string, ArrayBuffer>();
 const files = new Map<string, string>();
@@ -121,7 +132,7 @@ const server = Bun.serve({
     "/v1/limits": () =>
       Response.json({
         key: { id: "key_1", scoped: false, prefix: "", permissions: ["read", "write", "delete"], expiresAt: null },
-        plan: "free",
+        plan: plan.name,
         tier: "unclaimed",
         ownerUsedBytes: null,
         ownerLimitBytes: null,
@@ -131,7 +142,7 @@ const server = Bun.serve({
         owner: null,
         expiresAt: null,
         maxCapBytes: 1e10,
-        maxFileBytes: PART_BYTES,
+        maxFileBytes: plan.maxFileBytes,
         maxMultipartBytes: PART_BYTES * 10_000,
         partBytes: PART_BYTES,
         maxBatchFiles: 1000,
@@ -204,13 +215,26 @@ const server = Bun.serve({
   },
 });
 afterAll(() => server.stop());
+const scratch: string[] = [];
+const scratchDir = async (prefix: string) => {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  scratch.push(dir);
+  return dir;
+};
+afterEach(async () => {
+  await Promise.all(scratch.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  for (const [sha256, bytes] of blobs) if (bytes.byteLength > MB) blobs.delete(sha256);
+  plan.name = "pro";
+  plan.maxFileBytes = 5 * 1024 * MB * MB;
+});
 
 const config = await mkdtemp(join(tmpdir(), "agentfs-config-"));
+afterAll(() => rm(config, { recursive: true, force: true }));
 
 const agentfs = runner(server, config);
 
-const makeFolder = async (name: string, contents: Record<string, string>) => {
-  const folder = join(await mkdtemp(join(tmpdir(), "agentfs-put-")), name);
+const makeFolder = async (name: string, contents: Record<string, string | Uint8Array>) => {
+  const folder = join(await scratchDir("agentfs-put-"), name);
   await Promise.all(
     Object.entries(contents).map(async ([path, body]) => {
       await mkdir(join(folder, path, ".."), { recursive: true });
@@ -260,7 +284,7 @@ test("bytes the account already holds are linked to a new path, not sent again",
 
 test("pull downloads a folder and then skips the files it already has", async () => {
   await agentfs("put", await makeFolder("results", { "a.txt": "alpha", "deep/b.txt": "beta" }));
-  const into = await mkdtemp(join(tmpdir(), "agentfs-pull-"));
+  const into = await scratchDir("agentfs-pull-");
 
   const first = await agentfs("pull", "results", into);
   expect(first.stderr).toContain("2 downloaded");
@@ -284,14 +308,36 @@ test("put skips what .gitignore ignores and files that look like secrets", async
   expect(result.stderr).toContain("skipped 1 files that look like secrets: app/.env");
 });
 
-test("a file bigger than one request goes up in parts and comes back whole", async () => {
+test("on a plan with a 5 TB file cap, a file above 90 MB goes up in parts and comes back whole", async () => {
   parts.clear();
-  const body = "a fairly long file that needs three parts";
-  await agentfs("put", await makeFolder("large", { "data.txt": body }));
-  expect(parts.size).toBe(Math.ceil(body.length / PART_BYTES));
-  const into = await mkdtemp(join(tmpdir(), "agentfs-pull-"));
+  const body = bigBody("large");
+  await agentfs("put", await makeFolder("large", { "data.bin": body }));
+  expect(parts.size).toBe(3);
+  const into = await scratchDir("agentfs-pull-");
   await agentfs("pull", "large", into);
-  expect(await readFile(join(into, "large", "data.txt"), "utf8")).toBe(body);
+  expect(sha256Of(await readFile(join(into, "large", "data.bin")))).toBe(sha256Of(body));
+});
+
+test("exactly 90 MB goes up in one request and one byte more goes up in parts", async () => {
+  uploads.length = 0;
+  started.length = 0;
+  const folder = await makeFolder("edge", { "exact.bin": bigBody("exact", 90 * MB), "above.bin": bigBody("above") });
+  const result = await agentfs("put", folder);
+  expect(result.code).toBe(0);
+  expect(uploads.toSorted()).toEqual(["edge/above.bin", "edge/exact.bin"]);
+  expect(started).toEqual(["edge/above.bin:true"]);
+});
+
+test("a file above the plan's file cap is refused before any bytes are sent", async () => {
+  uploads.length = 0;
+  started.length = 0;
+  plan.name = "free";
+  plan.maxFileBytes = 50 * MB;
+  const result = await agentfs("put", await makeFolder("huge", { "data.bin": bigBody("huge", 60 * MB) }));
+  expect(result.code).toBe(1);
+  expect(result.stderr).toContain("error: huge/data.bin: file_too_large: 60 MB is more than the 50 MB one file can be on the free plan. See agentfs limits.");
+  expect(uploads).toEqual([]);
+  expect(started).toEqual([]);
 });
 
 test("a folder that .gitignore ignores is still uploaded when you name it", async () => {
@@ -304,9 +350,9 @@ test("a folder that .gitignore ignores is still uploaded when you name it", asyn
 
 test("a resume state for an upload the server no longer has starts a new upload", async () => {
   parts.clear();
-  const body = "this one resumes from a stale state";
-  const folder = await makeFolder("stale", { "data.txt": body });
-  const sha256 = new Bun.CryptoHasher("sha256").update(body).digest("hex");
+  const body = bigBody("stale");
+  const folder = await makeFolder("stale", { "data.bin": body });
+  const sha256 = sha256Of(body);
   const state = { upload: crypto.randomUUID(), uploadId: "stale", partBytes: PART_BYTES, direct: true, done: [] };
   await mkdir(join(config, "agentfs", "uploads"), { recursive: true });
   await writeFile(join(config, "agentfs", "uploads", `test-${sha256}.json`), JSON.stringify(state));
@@ -321,14 +367,14 @@ test("put does not overwrite a file that changed remotely, and --force does", as
   await agentfs("put", await makeFolder("seed-late", { "x.txt": "late bytes, new" }));
   const folder = await makeFolder("race", {
     "a.txt": "first a",
-    "big.txt": "a file that needs parts, first",
+    "big.txt": bigBody("race big, first"),
     "ok.txt": "first ok",
     "late.txt": "late bytes, old",
   });
   await agentfs("put", folder);
   await Promise.all([
     writeFile(join(folder, "a.txt"), "second a"),
-    writeFile(join(folder, "big.txt"), "a file that needs parts, 2nd!"),
+    writeFile(join(folder, "big.txt"), bigBody("race big, second")),
     writeFile(join(folder, "ok.txt"), "second ok"),
     writeFile(join(folder, "late.txt"), "late bytes, new"),
   ]);
@@ -366,7 +412,7 @@ test("put --ttl sets the expiry on single, multipart and linked files", async ()
   expiries.clear();
   const folder = await makeFolder("ttl", {
     "small.txt": "small",
-    "big.txt": "a file that needs several parts",
+    "big.txt": bigBody("ttl"),
     "known.txt": "known bytes",
   });
   const result = await agentfs("put", folder, "--ttl", "1d");
@@ -392,10 +438,9 @@ const resetStorage = () => {
 
 test("parts go straight to the storage URLs with no credentials and complete with the ETags as returned", async () => {
   resetStorage();
-  const body = "sent in three parts, straight to storage";
-  const result = await agentfs("put", await makeFolder("direct", { "data.txt": body }), "--json");
+  const result = await agentfs("put", await makeFolder("direct", { "data.bin": bigBody("direct") }), "--json");
   expect(result.code).toBe(0);
-  expect(started).toEqual(["direct/data.txt:true"]);
+  expect(started).toEqual(["direct/data.bin:true"]);
   expect(partListings).toEqual([3]);
   expect(storageWrites.toSorted()).toEqual([1, 2, 3]);
   expect(storageCredentials).toEqual([null, null, null]);
@@ -412,8 +457,7 @@ test("parts go straight to the storage URLs with no credentials and complete wit
 test("a 403 from storage fetches fresh URLs for the part and carries on", async () => {
   resetStorage();
   storage.expireAfterStart = true;
-  const body = "its first URLs expire, then fresh ones";
-  const result = await agentfs("put", await makeFolder("expired", { "data.txt": body }));
+  const result = await agentfs("put", await makeFolder("expired", { "data.bin": bigBody("expired") }));
   expect(result.code).toBe(0);
   expect(storageWrites.toSorted()).toEqual([1, 2, 3]);
   expect(storageCredentials.length).toBeGreaterThan(3);
@@ -423,10 +467,10 @@ test("a 403 from storage fetches fresh URLs for the part and carries on", async 
 
 test("a resume fetches fresh URLs and sends only the parts that are left", async () => {
   resetStorage();
-  const body = "this one resumes after two of three parts";
-  const folder = await makeFolder("resumed", { "data.txt": body });
-  const sha256 = new Bun.CryptoHasher("sha256").update(body).digest("hex");
-  const bytes = new TextEncoder().encode(body);
+  const body = bigBody("resumed");
+  const folder = await makeFolder("resumed", { "data.bin": body });
+  const sha256 = sha256Of(body);
+  const bytes = new Uint8Array(body.buffer, body.byteOffset, body.length);
   parts.set(1, bytes.slice(0, PART_BYTES).buffer);
   parts.set(2, bytes.slice(PART_BYTES, PART_BYTES * 2).buffer);
   const state = {
@@ -448,5 +492,5 @@ test("a resume fetches fresh URLs and sends only the parts that are left", async
   expect(partListings).toEqual([3]);
   expect(storageWrites).toEqual([3]);
   expect(completed[0]?.map(({ etag }) => etag)).toEqual(['"etag-1"', '"etag-2"', '"etag-3"']);
-  expect(new TextDecoder().decode(blobs.get(sha256))).toBe(body);
+  expect(sha256Of(new Uint8Array(blobs.get(sha256) ?? new ArrayBuffer(0)))).toBe(sha256);
 });

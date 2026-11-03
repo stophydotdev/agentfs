@@ -39,11 +39,11 @@ Turso's CLI is also called `agentfs`, and its `agentfs run` is not ours. Ours ru
 ## Use agentfs when
 
 - You want a link for every file. Anyone can open it, and it answers byte ranges, so video seeks.
-- Files are large. A file can be up to 5 TB, as long as it fits your storage.
+- Files are large. The biggest file depends on your plan. See [Limits](/reference/limits).
 - Several machines or agents write to the same files. Bytes are stored once, and a conditional write (`If-Match`, `If-None-Match`) reports a conflict instead of losing one side.
 - You want to fork a folder, take a snapshot, restore it and diff it from any machine, without copying bytes.
 - A parent agent hands each sub-agent a scoped key for one folder, one set of permissions and one hour.
-- You want deleted files back for 7 days, files that delete themselves after a ttl, and a way to watch writes as they happen.
+- You want deleted files back within your plan's history, files that delete themselves after a ttl, and a way to watch writes as they happen.
 - You want a key-value store with compare-and-swap, where `--create-only` works as a lock across machines and agents.
 
 ## Move between them

@@ -3,11 +3,78 @@ title: "MCP tools"
 description: "The storage tools an agent gets from the agentfs MCP server."
 ---
 
-For an agent that cannot run commands. Print the config with `agentfs mcp`, or point an MCP client at `<server>/mcp` with `Authorization: Bearer <key>`.
+Give an agent that has no shell the agentfs storage tools. Print the config with `agentfs mcp`, or point an MCP client at `<server>/mcp` with `Authorization: Bearer <key>`.
 
 ```bash
 agentfs mcp
 ```
+
+The config holds a key, so treat the output like a password. Plain `agentfs mcp` prints your full key and says so on stderr. To give the agent one folder, make a key for it:
+
+```bash
+agentfs mcp --prefix runs/42 --ttl 1d
+```
+
+It creates a [scoped key](/guides/keys-and-sharing) for `runs/42/` with read and write, puts that key in the config, and prints which key it made on stderr. Add `--read`, `--write` or `--delete` to choose the permissions. Stop the key with `agentfs key revoke <id>`.
+
+## Connect a client
+
+Set the key in an environment variable first, so it stays out of the files:
+
+```bash
+export AGENTFS_KEY=<the key from agentfs mcp>
+```
+
+<Tabs>
+  <Tab title="Claude Code">
+    Add the server to the project's `.mcp.json`:
+
+    ```json
+    {
+      "mcpServers": {
+        "agentfs": {
+          "type": "http",
+          "url": "https://agentfs.cloud/mcp",
+          "headers": { "Authorization": "Bearer ${AGENTFS_KEY}" }
+        }
+      }
+    }
+    ```
+
+    Start `claude`, approve the server, and run `/mcp` to check it is connected.
+  </Tab>
+  <Tab title="Cursor">
+    Add the server to `.cursor/mcp.json` in the project, or to `~/.cursor/mcp.json` for every project:
+
+    ```json
+    {
+      "mcpServers": {
+        "agentfs": {
+          "url": "https://agentfs.cloud/mcp",
+          "headers": { "Authorization": "Bearer ${env:AGENTFS_KEY}" }
+        }
+      }
+    }
+    ```
+
+    Open **Customize** and check that `agentfs` is on.
+  </Tab>
+  <Tab title="Codex">
+    Add the server to `~/.codex/config.toml`:
+
+    ```toml
+    [mcp_servers.agentfs]
+    url = "https://agentfs.cloud/mcp"
+    bearer_token_env_var = "AGENTFS_KEY"
+    ```
+
+    Start `codex` and type `/mcp` to check it is connected.
+  </Tab>
+</Tabs>
+
+Use your own server's address in place of `https://agentfs.cloud` if `agentfs mcp` printed a different one. Chat apps that only connect through a sign-in page cannot use this server, because it takes a key and not a sign-in.
+
+## Tools
 
 | Tool | What it does |
 |---|---|

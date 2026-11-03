@@ -6,7 +6,9 @@ import { version } from "../package.json";
 import { AgentFS, AgentFSError } from "../src/index";
 import { startStub } from "./stub";
 
-const stub = startStub({ maxFileBytes: 1536 * 1024, partBytes: 1024 * 1024, urlsPerBatch: 2, pageSize: 2 });
+const MB = 1024 * 1024;
+// A Pro plan: its file cap is 5 TB, which must not decide when a write goes up in parts.
+const stub = startStub({ maxFileBytes: 5 * 1024 * 1024 * MB, partBytes: 32 * MB, urlsPerBatch: 2, pageSize: 2 });
 afterAll(() => stub.stop());
 
 const KEY = `afs_${stub.account}.0.${"b".repeat(64)}`;
@@ -116,9 +118,10 @@ describe("fs", () => {
     expect(await agent.fs.readFile("/b.txt", "utf8")).toBe("same bytes");
   });
 
-  test("a write above maxFileBytes goes straight to storage in parts, fetching more URLs when needed", async () => {
+  test("a write above 90 MB goes straight to storage in parts, whatever the plan's file cap", async () => {
     const agent = await open();
-    const big = new Uint8Array(3 * 1024 * 1024 + 17).map((_, index) => index % 251);
+    const big = new Uint8Array(90 * MB + 17).fill(7);
+    for (let at = 0; at < big.length; at += 1_000_003) big[at] = at % 251;
     stub.seen.partFetches = 0;
     await agent.fs.writeFile("/big.bin", big);
     expect(stub.seen.partFetches).toBe(1);
@@ -129,7 +132,7 @@ describe("fs", () => {
 
   test("a failed direct upload is aborted", async () => {
     const agent = await open();
-    const big = new Uint8Array(2 * 1024 * 1024).fill(7);
+    const big = new Uint8Array(90 * MB + 1).fill(7);
     const hashing = crypto.subtle.digest;
     crypto.subtle.digest = async () => new Uint8Array(32).buffer;
     stub.seen.aborted = 0;

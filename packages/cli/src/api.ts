@@ -137,7 +137,7 @@ const started = z.object({
 const partUrlPage = z.object({ from: z.number(), partUrls: z.array(z.string()) });
 const part = z.object({ partNumber: z.number(), etag: z.string() });
 const forked = z.object({ from: z.string(), to: z.string(), copied: z.number() });
-const claimLink = z.object({ url: z.string(), expiresAt: z.string() });
+const claimLink = z.object({ url: z.string(), expiresAt: z.string(), message: z.string().optional() });
 const issuedKey = z.object({ key: z.string() });
 const keyInfo = z.object({
   id: z.string(),
@@ -357,12 +357,17 @@ export const connect = async (given?: { key: string; source: KeySource }) => {
     history.parse(
       await (await send(`/v1/events?${new URLSearchParams(params)}`, { headers })).json(),
     );
-  const browse = async (prefix: string, delimiter = "") => {
+  const browse = async (prefix: string, delimiter = "", search = "") => {
     const files: RemoteFile[] = [];
     const folders: string[] = [];
     let cursor = "";
     do {
-      const query = new URLSearchParams({ prefix, cursor, ...(delimiter === "" ? {} : { delimiter }) });
+      const query = new URLSearchParams({
+        prefix,
+        cursor,
+        ...(delimiter === "" ? {} : { delimiter }),
+        ...(search === "" ? {} : { q: search }),
+      });
       const next = page.parse(await (await send(`/v1/files?${query}`, { headers })).json());
       files.push(...next.files);
       folders.push(...next.folders);
@@ -375,7 +380,7 @@ export const connect = async (given?: { key: string; source: KeySource }) => {
     source,
     account: key.slice("afs_".length).split(".")[0] ?? "",
     browse,
-    list: async (prefix: string) => (await browse(prefix)).files,
+    list: async (prefix: string, search = "") => (await browse(prefix, "", search)).files,
     stat: async (path: string): Promise<RemoteFile | null> => {
       const response = await send(`/v1/files/${segments(path)}`, { method: "HEAD", headers }).catch(
         (error: Error) => {

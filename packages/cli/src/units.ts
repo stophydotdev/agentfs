@@ -1,11 +1,12 @@
 import { UsageError } from "./usage-error";
 
+/** The same sizes the server uses: 1 GB is 1024 MB, so 1 GB of storage reads "1 GB" here and in the docs. */
 const UNITS = new Map([
   ["B", 1],
-  ["KB", 1e3],
-  ["MB", 1e6],
-  ["GB", 1e9],
-  ["TB", 1e12],
+  ["KB", 1024],
+  ["MB", 1024 ** 2],
+  ["GB", 1024 ** 3],
+  ["TB", 1024 ** 4],
 ]);
 
 export const parseBytes = (text: string) => {

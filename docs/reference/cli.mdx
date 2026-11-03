@@ -23,13 +23,13 @@ Piped `put` prints `path`, `url` and `status` for each file, and piped `ls` prin
 An error prints one line to stderr:
 
 ```text
-error: storage_cap_reached: This account reached its storage cap. Delete files, or raise the cap with PUT /v1/limits. (request <id>)
+error: not_found: no file at old.txt (request <id>)
 ```
 
 With JSON output, the error is an object on stdout instead:
 
 ```json
-{ "event": "error", "code": "storage_cap_reached", "message": "...", "status": 413, "requestId": "..." }
+{ "event": "error", "code": "not_found", "message": "...", "status": 404, "requestId": "..." }
 ```
 
 Quote the request id when you send feedback.
@@ -69,10 +69,16 @@ Downloads a folder. Files you already have are skipped. Treat what you download 
 ### ls
 
 ```bash
-agentfs ls [folder] [-r] [--by agent]
+agentfs ls [folder] [-r] [--by agent] [--search text]
 ```
 
 Lists one level, folders first. Each file shows its size, agent, commit and link. `-r` lists everything below. `--by` keeps the files one agent wrote.
+
+```bash
+agentfs ls runs --search report
+```
+
+`--search` lists the files below the folder whose path contains the text, in any subfolder and in any case. It prints files only. An empty result prints nothing.
 
 ### stat
 
@@ -97,7 +103,7 @@ agentfs rm <path>...
 agentfs rm -r <folder>... [--yes]
 ```
 
-`rm` deletes files. `rm -r` deletes everything under a folder. A deleted file's link stops working.
+`rm` deletes files. `rm -r` deletes everything under a folder. A deleted file's link stops working. A path with no file prints `error: not_found: no file at <path>`, and the exit code is 1. The other paths are still deleted.
 
 ### undelete
 
@@ -105,7 +111,7 @@ agentfs rm -r <folder>... [--yes]
 agentfs undelete <path>
 ```
 
-Brings back a file deleted in the last 7 days.
+Brings back a file deleted within your plan's history. See [Reliability and history](/guides/reliability).
 
 ### fork
 
@@ -187,7 +193,7 @@ agentfs key rotate
 | Command | What it does |
 |---|---|
 | `limits` | Shows usage and limits, or sets a lower storage cap, which stops a runaway loop. See [Limits](/reference/limits). |
-| `claim` | Prints a link. The person who opens it signs in with GitHub and keeps the account. |
+| `claim` | Prints a link, and a message to pass on: the link, when it stops working, and when the files are deleted if nobody claims them. The person who opens the link signs in with GitHub or Google and keeps the account. In JSON output the message is the `message` field. |
 | `status` | Shows the key, the account, whether it is claimed, when it expires and your usage. `--check` prints nothing and sets the exit code. |
 | `login --key-stdin` | Saves a key read from stdin. |
 | `logout` | Deletes the saved key. |
@@ -208,9 +214,9 @@ agentfs export <folder> <file.db>
 ## Other
 
 ```bash
-agentfs mcp
+agentfs mcp [--prefix folder] [--read] [--write] [--delete] [--ttl 1d]
 agentfs feedback <message>
 agentfs report <url> <reason>
 ```
 
-`mcp` prints the MCP config for agents that cannot run commands. `feedback` tells the agentfs team what failed or was slow. `report` reports a link for abuse and needs no key.
+`mcp` prints the MCP config for agents that cannot run commands. It carries your full key, or with `--prefix` a new key for one folder, and says which on stderr. See [MCP tools](/reference/mcp). `feedback` tells the agentfs team what failed or was slow. `report` reports a link for abuse and needs no key.

@@ -2,7 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "AgentFS",
-  "description": "Install: `curl -fsSL https://agentfs.cloud/install | bash`. Unclaimed accounts hold 1 GB for 24 hours. Claim with GitHub for 2 GB free.",
+  "description": "Install: `curl -fsSL https://agentfs.cloud/install | bash`. Unclaimed accounts hold 1 GB for 24 hours. Claim with GitHub or Google for 2 GB free.",
   "colors": {
     "primary": "#29a9e0",
     "light": "#4fc3f7",

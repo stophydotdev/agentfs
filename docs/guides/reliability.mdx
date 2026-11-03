@@ -1,17 +1,33 @@
 ---
-title: "Reliability and backups"
-description: "What agentfs keeps, for how long, and what protects you from losing a write."
+title: "Reliability and history"
+description: "What agentfs keeps, for how long, and what you can bring back."
 ---
+
+See what agentfs keeps, for how long, and what you can bring back.
+
+Deleted files and the timeline are kept for the history window of your plan. See [Limits](/reference/limits) for the days. agentfs has no backup you can restore from, apart from the snapshots you take.
 
 ## What we keep
 
 | What | For how long |
 |---|---|
-| A deleted file's bytes | 7 days. Bring a file back with `agentfs undelete <path>`. |
+| A deleted or expired file's bytes | The history window of your plan. Bring the file back with `agentfs undelete <path>`. |
+| The timeline: who wrote what | The same history window. Older events are dropped. |
 | A snapshot | Until you delete it. |
 | The bytes a snapshot holds | As long as the snapshot exists, even if you delete the file. They count toward your usage. |
 | A response to a write with an `Idempotency-Key` | 24 hours. |
 | Files of an unclaimed account | 24 hours after its first upload. |
+
+## What you can bring back
+
+| You did | You can bring it back with | Until |
+|---|---|---|
+| Deleted a file, or it expired from its `--ttl` | `agentfs undelete <path>`. It restores the version the file had when it was deleted. | The history window ends |
+| Deleted or changed many files in a folder | `agentfs restore <snapshot>`, if you took a snapshot first | You delete the snapshot |
+| Overwrote a file | Nothing, unless a snapshot holds the old version. `undelete` does not bring back an overwritten version. | |
+| Deleted a whole unclaimed account, or it expired | Nothing. Its files and history go with it. | |
+
+`undelete` fails with `file_exists` when there is a file at that path now, and with `not_found` when nothing deleted at that path is left.
 
 ## Two writers, no lost write
 
@@ -36,6 +52,6 @@ Every response has an `x-request-id` header, and every error body has a `request
 
 ## Undo a mistake
 
-- A deleted file: `agentfs undelete <path>`, within 7 days.
-- A folder changed by a bad step: `agentfs restore <snapshot>`.
+- A deleted file: `agentfs undelete <path>`, within the history window.
+- A folder changed by a bad step: `agentfs restore <snapshot>`. Take the snapshot before the step.
 - A write that raced another: the 412 or `conflict` told you, and nothing was lost.

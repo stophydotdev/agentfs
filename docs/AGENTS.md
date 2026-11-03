@@ -22,7 +22,7 @@
 
 - **account**: where files live. Never "workspace" or "project".
 - **key**: the secret that opens an account. **scoped key**: a key limited to one folder, some permissions and a time. The key you got from signing up is the **full key**.
-- **claim**: a person takes an account with GitHub so it is kept. Say "claim", not "register" or "upgrade".
+- **claim**: a person takes an account with GitHub or Google so it is kept. Say "claim", not "register" or "upgrade".
 - **link**: the public URL of a file. Not "share URL" or "permalink".
 - **folder**: a path ending in `/`. Folders are implicit. Never say "directory" for an agentfs folder, and never "bucket".
 - **snapshot**: a named record of a folder. **restore** and **diff** work on snapshots.
@@ -34,7 +34,7 @@
 - Plain words and short sentences. One idea per sentence.
 - Use active voice and second person ("you").
 - No em dashes. No hype. No marketing words.
-- No prices. Do not mention paid plans or amounts of money.
+- No prices. Name the plans and their limits, and link to https://agentfs.cloud/pricing for prices. Never write an amount of money.
 - Use sentence case for headings.
 - Open each page with one sentence: what it does for the reader. Then code they can paste. Then one to three sentences.
 - State exact behavior: the error, the limit, what an empty result looks like.
@@ -48,4 +48,4 @@
 - Do not document admin endpoints (`/v1/admin/*`) or internal tools. The only abuse endpoint to document is reports.
 - Do not write infrastructure secrets, account ids, bucket names, internal hostnames or deploy details.
 - Do not document anything that is not in the code or the OpenAPI document.
-- Do not mention paid plans or prices.
+- Do not write prices. Plans and their limits are fine.

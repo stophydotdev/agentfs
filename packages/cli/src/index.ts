@@ -35,6 +35,7 @@ const USAGE = `agentfs ${version}: upload files and get links
               [--force] [--ttl 1d]               --force overwrites a file changed remotely; --ttl deletes the files after that long
   agentfs pull <folder> [into]                   download; unchanged files are skipped
   agentfs ls [folder] [-r] [--by agent]          list one level, folders first; -r lists everything below
+            [--search text]                      files below the folder whose path has the text, any case
   agentfs stat <path>                            size, type, sha256, last modified, agent, session, commit, link
   agentfs mv <from> <to> [--yes]                 move a file or a folder (a folder ends in /)
   agentfs undelete <path>                        bring back a file deleted in the last 7 days
@@ -67,7 +68,8 @@ const USAGE = `agentfs ${version}: upload files and get links
   agentfs key list                               list the keys made for this account
   agentfs key revoke <id>                        stop a key from working
   agentfs key create [--prefix folder] [--read] [--write] [--delete] [--ttl 1h]  make a key limited to a folder
-  agentfs mcp                                    print the MCP config for agents without a shell
+  agentfs mcp [--prefix folder] [--ttl 1d]       print the MCP config; --prefix makes a key for that folder (read and write,
+              [--read] [--write] [--delete]      or the ones you name) instead of using your full key
   agentfs feedback <message>                     tell the agentfs team what slows you down
   agentfs report <url> <reason>                  report a file that breaks the rules; no key needed
 
@@ -87,6 +89,13 @@ const usageFor = (command: string) => {
     return current === command;
   });
 };
+
+/** Commands the 0.0.2 CLI and the old skill used, with the line that names what to run now. */
+const RENAMED = new Map([
+  ["upload", "agentfs upload is now agentfs put. Run: agentfs put <file or folder>... [--to folder]"],
+  ["share", "agentfs share is gone: every file from agentfs put has a public link. Run: agentfs put <file>"],
+  ["init", "agentfs init is gone: any command signs you up. To use a key you have, run: agentfs login --key-stdin"],
+]);
 
 const MIN_ARGS = new Map([
   ["put", 1],
@@ -135,6 +144,7 @@ const OPTIONS = {
     "create-only": { type: "boolean", default: false },
     ttl: { type: "string" },
     prefix: { type: "string", default: "" },
+    search: { type: "string" },
     read: { type: "boolean", default: false },
     write: { type: "boolean", default: false },
     delete: { type: "boolean", default: false },
@@ -206,6 +216,16 @@ const isFolder = async (api: Api, path: string) => {
 };
 
 const byAgent = (file: RemoteFile) => values.by === "" || file.agent === values.by;
+
+/** Older servers answer 204 when deleting a file that is not there, so look first. A key that cannot read still gets to try the delete. */
+const isMissing = (api: Api, path: string) =>
+  api.stat(path).then(
+    (file) => file === null,
+    (error: Error) => {
+      if (error instanceof ApiError && error.status === 403) return false;
+      throw error;
+    },
+  );
 
 const PERMISSIONS = ["read", "write", "delete"] as const;
 const USAGE_LABELS = ["agent", "session", "commit"];
@@ -350,6 +370,21 @@ const tierLine = (limits: Awaited<ReturnType<Api["limits"]>>) => {
   return `plan ${limits.plan}: ${used}${of} used across your accounts`;
 };
 
+/** The key the MCP config carries: a new one limited to --prefix, or the key this command runs with. */
+const mcpKey = async (api: Api) => {
+  if (values.prefix === "") {
+    const { key } = await api.limits();
+    const about = key.scoped
+      ? `the scoped key you ran this with: ${key.prefix || "everything"}, ${key.permissions.join(",")}.`
+      : "your full key, which opens every folder and can do everything. For one folder, add --prefix <folder>.";
+    return { key: api.key, about };
+  }
+  const permissions = PERMISSIONS.filter((permission) => values[permission]);
+  const made = await api.createKey(folder(values.prefix), permissions.length === 0 ? ["read", "write"] : permissions, ttlOf());
+  const about = `a new scoped key, ${made.id}: ${made.prefix || "everything"}, ${made.permissions.join(",")}, ends ${made.expiresAt ?? "never"}. Stop it with agentfs key revoke ${made.id}.`;
+  return { key: made.key, about };
+};
+
 const commands = {
   put: async (api: Api, args: string[]) => upload(api, args, values.to, ttlOf()),
   pull: async (api: Api, [folder = "", into = "."]: string[]) => {
@@ -362,6 +397,12 @@ const commands = {
     summarize(started, outcomes);
   },
   ls: async (api: Api, [path = ""]: string[]) => {
+    if (values.search !== undefined) {
+      const needle = values.search.toLowerCase();
+      const found = await api.list(folder(path), values.search);
+      for (const file of found.filter(byAgent).filter((file) => file.path.toLowerCase().includes(needle))) printFile(file);
+      return;
+    }
     if (values.recursive) {
       for (const file of (await api.list(path)).filter(byAgent)) printFile(file);
       return;
@@ -406,8 +447,17 @@ const commands = {
       return;
     }
     for (const path of paths) {
-      await api.remove(path);
-      print(json ? JSON.stringify({ path, deleted: true }) : path);
+      const missing =
+        (await isMissing(api, path)) ||
+        (await api.remove(path).then(
+          () => false,
+          (error: Error) => {
+            if (error instanceof ApiError && error.code === "not_found") return true;
+            throw error;
+          },
+        ));
+      if (missing) process.exitCode = failWith(new ApiError("not_found", `no file at ${path}`));
+      else print(json ? JSON.stringify({ path, deleted: true }) : path);
     }
   },
   snapshot: async (api: Api, [first = "", second = ""]: string[]) => {
@@ -611,14 +661,18 @@ const commands = {
     print(`used      ${formatBytes(limits.usedBytes)} of ${sizeOf(limits.capBytes)} (${limits.files} files)`);
     print(`owner     ${limits.owner === null ? `nobody yet; files expire ${limits.expiresAt ?? "24 hours after the first upload"} unless claimed (agentfs claim)` : limits.owner}`);
     print(`max cap   ${sizeOf(limits.maxCapBytes)} on the ${limits.plan} plan`);
-    print(`max file  ${formatBytes(limits.maxFileBytes)} in one request, ${formatBytes(limits.maxMultipartBytes)} in parts`);
+    print(`max file  ${formatBytes(limits.maxFileBytes)} on the ${limits.plan} plan`);
     print(`parallel  ${limits.parallelUploads} uploads, ${limits.maxBatchFiles} files per batch`);
   },
   claim: async (api: Api) => {
     const link = await api.claim();
-    if (json) return print(JSON.stringify(link));
+    const { expiresAt: deleteAt } = await api.limits();
+    const message =
+      link.message ??
+      `Give your person this link:\n${link.url}\nThey sign in with GitHub or Google to keep these files. The link works until ${link.expiresAt}. Files nobody has claimed are deleted ${deleteAt === null ? "24 hours after the first upload" : `at ${deleteAt}`}.`;
+    if (json) return print(JSON.stringify({ ...link, message }));
     print(link.url);
-    process.stderr.write(`Give this link to your person. They sign in with GitHub and the files are kept. It works until ${link.expiresAt}.\n`);
+    process.stderr.write(`${message}\n`);
   },
   key: async (api: Api, [action = "", id = ""]: string[]) => {
     if (action === "list") {
@@ -655,8 +709,10 @@ const commands = {
     }
   },
   mcp: async (api: Api) => {
-    const config = { mcpServers: { agentfs: { type: "http", url: `${baseUrl()}/mcp`, headers: { Authorization: `Bearer ${api.key}` } } } };
+    const used = await mcpKey(api);
+    const config = { mcpServers: { agentfs: { type: "http", url: `${baseUrl()}/mcp`, headers: { Authorization: `Bearer ${used.key}` } } } };
     print(JSON.stringify(config, null, 2));
+    process.stderr.write(`key: ${used.about}\n`);
   },
   feedback: async (api: Api, words: string[]) => {
     await api.feedback(words.join(" "));
@@ -731,7 +787,7 @@ const run = async ([name = "", ...args]: string[]) => {
     process.stdout.write(USAGE);
     return;
   }
-  if (!known) throw new UsageError(`unknown command "${name}". Run agentfs --help.`);
+  if (!known) throw new UsageError(RENAMED.get(name) ?? `unknown command "${name}". Run agentfs --help.`);
   if (args.length < (MIN_ARGS.get(name) ?? 0)) {
     throw new UsageError(`agentfs ${name} needs more arguments:\n${usageFor(name).join("\n")}`);
   }
