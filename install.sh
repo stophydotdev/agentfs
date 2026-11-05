@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-PACKAGE="@agentfs/cli@^0.1.0"
+PACKAGE="@agentfs/cli@^1.0.0"
 
 have() {
   command -v "$1" >/dev/null 2>&1

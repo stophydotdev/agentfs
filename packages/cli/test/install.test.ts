@@ -59,7 +59,7 @@ test("with Bun it runs bun add -g, adds the skill, and shows the version and the
   expect(result.code).toBe(0);
   expect(result.calls).toEqual([
     "node --version",
-    "bun add -g @agentfs/cli@^0.1.0",
+    "bun add -g @agentfs/cli@^1.0.0",
     "bun pm bin -g",
     "agentfs --version",
     `bunx --bun ${ADD_SKILL}`,
@@ -72,7 +72,7 @@ test("without Bun it uses npm when Node is 20.12 or newer", async () => {
   expect(result.code).toBe(0);
   expect(result.calls).toEqual([
     "node --version",
-    "npm install -g @agentfs/cli@^0.1.0",
+    "npm install -g @agentfs/cli@^1.0.0",
     "npm prefix -g",
     "agentfs --version",
     `npx -y ${ADD_SKILL}`,

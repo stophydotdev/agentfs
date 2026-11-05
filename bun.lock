@@ -7,7 +7,7 @@
     },
     "packages/cli": {
       "name": "@agentfs/cli",
-      "version": "0.0.2",
+      "version": "1.0.0",
       "bin": {
         "agentfs": "dist/agentfs.js",
       },
@@ -20,7 +20,7 @@
     },
     "packages/sdk": {
       "name": "@agentfs/sdk",
-      "version": "0.0.1",
+      "version": "1.0.0",
       "devDependencies": {
         "@types/bun": "^1.3.14",
         "@types/node": "^24.0.0",
