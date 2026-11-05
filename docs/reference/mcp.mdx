@@ -1,0 +1,96 @@
+---
+title: "MCP tools"
+description: "The storage tools an agent gets from the agentfs MCP server."
+---
+
+Give an agent that has no shell the agentfs storage tools. Print the config with `agentfs mcp`, or point an MCP client at `<server>/mcp` with `Authorization: Bearer <key>`.
+
+```bash
+agentfs mcp
+```
+
+The config holds a key, so treat the output like a password. Plain `agentfs mcp` prints your full key and says so on stderr. To give the agent one folder, make a key for it:
+
+```bash
+agentfs mcp --prefix runs/42 --ttl 1d
+```
+
+It creates a [scoped key](/guides/keys-and-sharing) for `runs/42/` with read and write, puts that key in the config, and prints which key it made on stderr. Add `--read`, `--write` or `--delete` to choose the permissions. Stop the key with `agentfs key revoke <id>`.
+
+## Connect a client
+
+Set the key in an environment variable first, so it stays out of the files:
+
+```bash
+export AGENTFS_KEY=<the key from agentfs mcp>
+```
+
+<Tabs>
+  <Tab title="Claude Code">
+    Add the server to the project's `.mcp.json`:
+
+    ```json
+    {
+      "mcpServers": {
+        "agentfs": {
+          "type": "http",
+          "url": "https://agentfs.cloud/mcp",
+          "headers": { "Authorization": "Bearer ${AGENTFS_KEY}" }
+        }
+      }
+    }
+    ```
+
+    Start `claude`, approve the server, and run `/mcp` to check it is connected.
+  </Tab>
+  <Tab title="Cursor">
+    Add the server to `.cursor/mcp.json` in the project, or to `~/.cursor/mcp.json` for every project:
+
+    ```json
+    {
+      "mcpServers": {
+        "agentfs": {
+          "url": "https://agentfs.cloud/mcp",
+          "headers": { "Authorization": "Bearer ${env:AGENTFS_KEY}" }
+        }
+      }
+    }
+    ```
+
+    Open **Customize** and check that `agentfs` is on.
+  </Tab>
+  <Tab title="Codex">
+    Add the server to `~/.codex/config.toml`:
+
+    ```toml
+    [mcp_servers.agentfs]
+    url = "https://agentfs.cloud/mcp"
+    bearer_token_env_var = "AGENTFS_KEY"
+    ```
+
+    Start `codex` and type `/mcp` to check it is connected.
+  </Tab>
+</Tabs>
+
+Use your own server's address in place of `https://agentfs.cloud` if `agentfs mcp` printed a different one. Chat apps that only connect through a sign-in page cannot use this server, because it takes a key and not a sign-in.
+
+## Tools
+
+| Tool | What it does |
+|---|---|
+| `upload_file` | Saves text or base64 bytes at a path and returns a link. Pass `private` for a file with no link. |
+| `sign_link` | Makes a link that opens a file, private or not, for a few minutes with no key. Needs read on the file. |
+| `read_file` | Reads a file as text, or as base64 when it is not text. Up to 128 KB. |
+| `list_files` | Lists files under a folder, with their links. |
+| `delete_file` | Deletes a file, or a whole folder when the path ends in `/`. |
+| `create_snapshot` | Saves a snapshot. |
+| `restore_snapshot` | Makes a folder match a snapshot. |
+| `kv` | Reads a value, or writes one when you pass `value`. |
+
+Seven tools keep the list small, so it costs an agent less context. Moves, forks, the timeline, keys and claim links are in the CLI and the HTTP API.
+
+Writes made over MCP are recorded with the agent `mcp`.
+
+<Note>
+  These docs have their own MCP server, for searching the docs. It is at the docs site under `/mcp` and is not the storage server.
+</Note>

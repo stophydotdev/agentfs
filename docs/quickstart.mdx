@@ -1,0 +1,44 @@
+---
+title: "Quickstart"
+description: "Put a folder in the cloud and open a link to it. Three commands."
+---
+
+Pick a folder. This one is `./report`, and it holds one file, `index.html`, that says `<h1>run 42</h1>`.
+
+```bash
+curl -fsSL https://agentfs.cloud/install | bash
+agentfs put ./report --to runs/42
+curl -s https://agentfs.cloud/7d15d3b6da0bb24edce25579533f7ce3/runs/42/report/index.html
+```
+
+The first command installs the CLI. To skip it, run `npx -y @agentfs/cli` in place of `agentfs`. That needs Node 20.12 or newer.
+
+The second command uploads the folder. The first run signs up and saves a key. It prints one link per file, and a count on stderr:
+
+```text
+Signed up. Your key is in ~/.config/agentfs/key
+https://agentfs.cloud/7d15d3b6da0bb24edce25579533f7ce3/runs/42/report/index.html
+1 uploaded in 0.23s
+```
+
+The third command opens a link. Use one of the links `put` printed. It needs no key and prints the file:
+
+```text
+<h1>run 42</h1>
+```
+
+Run the second command again and nothing is sent. Change a file and only that file is sent, and its link stays the same.
+
+<Note>
+  When stdout is not a terminal, every command prints one JSON object per line. Add `--no-json` to get text, or `--json` to force JSON in a terminal.
+</Note>
+
+## Keep the files
+
+Files of an account that nobody has claimed are deleted 24 hours after the first upload. Run `agentfs claim` and give the link to a person. They sign in with GitHub or Google and the files are kept. See [Limits](/reference/limits) for what each plan holds.
+
+## Next
+
+- [Concepts](/concepts) for the words.
+- [Many agents](/guides/many-agents) to give each sub-agent its own key.
+- [CLI reference](/reference/cli) for every command.

@@ -1,0 +1,87 @@
+---
+title: "Keys and sharing"
+description: "Give a sub-agent a key for one folder, share a link, and hand the account to a person."
+---
+
+## Share a file
+
+Every file has a link: `https://agentfs.cloud/<account>/<path>`. Links answer `Range` requests, so video seeks. Uploading to the same path keeps the link.
+
+<Warning>
+  A link is public. It works for anyone who has it, with no key and no sign-in. To keep a file off the web, upload it as [private](#keep-a-file-private). Never upload secrets with a public link. `agentfs put` skips what `.gitignore` ignores and files that look like secrets (`.env`, `*.pem`, `*.key`, SSH keys). Add `--include-secrets` only when you mean it.
+</Warning>
+
+A link stops working when:
+
+- the file is deleted,
+- the file is moved or renamed, because the path changes,
+- the file expires, when you set a `--ttl`,
+- the owner's link downloads for the month are used up, on the Free and unclaimed plans. Links work again on the 1st (UTC). See [Limits](/reference/limits).
+
+Use the `url` the CLI or API gives you. Links may be served from a different host than the API.
+
+## Keep a file private
+
+```bash
+agentfs put page.html --to cache --private
+agentfs sign cache/page.html --ttl 5m
+```
+
+A private file has no link. `url` is `null` in every answer, and its public address answers 404. Only a key opens it, with `GET /v1/content/<path>`, or a signed link.
+
+`agentfs sign` prints a signed link. It opens the file with no key for 5 minutes, or the `--ttl` you give, up to 1 hour. The link stops working when the file is overwritten, moved, restored or deleted, when you rotate the key, and when the scoped key that made it expires or is revoked. A link never outlives its key. In the SDK it is `agent.fs.signedUrl(path)`.
+
+Privacy belongs to the file. Uploading to a private path without a flag keeps it private, and so do `mv` and `fork`. `restore` and `undelete` make a file private when the same bytes are private anywhere in the account. `--public` is the only way to make a private file public, and it needs a key that can read the file. A new file is public unless you pass `--private`. Link downloads count toward the monthly limit for signed links too. See [Limits](/reference/limits).
+
+## A key for one folder
+
+```bash
+agentfs key create --prefix runs/42/ --read --write --ttl 1h
+```
+
+The key opens only paths and kv keys under `runs/42/`. `--read`, `--write` and `--delete` choose what it may do. `--ttl` sets how long it lasts, from 1 minute to 1 year. Without `--prefix` it covers everything.
+
+Hand it to a sub-agent as `AGENTFS_KEY`. Rotate, setting a cap, claiming and usage need the full key, and a scoped key gets `key_scope`. A scoped key can make a narrower key. After it expires, it returns `key_expired`.
+
+## See and stop keys
+
+```bash
+agentfs key list
+agentfs key revoke <id>
+```
+
+`key list` shows each key's id, folder, permissions, expiry, last four characters and whether it is revoked. A revoked key returns `key_revoked`.
+
+`agentfs key rotate` replaces your full key. The old one stops working at once and returns `key_revoked`, and so does every scoped key made before it.
+
+A key from before the 1.0 format, a long one with dots in it, returns `key_format_changed`. Make a new key in the dashboard at https://agentfs.cloud, then run `agentfs login --key-stdin`.
+
+## Check which key you have
+
+```bash
+agentfs status
+```
+
+It shows where the key comes from, the account, whether the key is full or scoped, the owner, when the account expires and your usage. `agentfs status --check` prints nothing and sets the exit code: 0 when the key works.
+
+To use a key you were given, pipe it in:
+
+```bash
+echo "$KEY" | agentfs login --key-stdin
+```
+
+`agentfs logout` deletes the saved key.
+
+## Keep an account: claim it
+
+An account that nobody has claimed is deleted 24 hours after its first upload, and its key stops working. Run:
+
+```bash
+agentfs claim
+```
+
+Give the link to a person. It works for one hour. They sign in with GitHub or Google and the account is theirs. See [Limits](/reference/limits) for what a claimed account gets.
+
+## Report a file
+
+`agentfs report <url> <reason>` reports a link for abuse. It needs no key. A file taken down after a report answers 451 `taken_down`.

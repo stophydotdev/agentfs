@@ -1,50 +1,19 @@
-export { Bucket } from "./bucket";
-export type {
-  AbortStaleMultipartOptions,
-  BlobDownload,
-  BlobInfo,
-  BlobObject,
-  BucketOptions,
-  CompletedBlob,
-  CopyOptions,
-  DeleteTarget,
-  FromEnvOptions,
-  ListMultipartOptions,
-  ListOptions,
-  ListPage,
-  MultipartOption,
-  MultipartUpload,
-  PutBody,
-  PutOptions,
-  S3Config,
-  S3Credentials,
-  SignedReadUrl,
-  SignedReadUrlOptions,
-  SignedUploadUrl,
-  SignedUploadUrlOptions,
-  UpdateJsonOptions,
-  UploadToken,
-  UploadTokenOptions,
-} from "./bucket";
-export { verifyUploadCallback, type UploadCallback } from "./callback";
-export { uploadHandler, uploadRoute } from "./handler";
-export type {
-  AnyUploadHandler,
-  BeforeUploadArgs,
-  BeforeUploadResult,
-  HandlerRoutes,
-  RouteConstraints,
-  StandardSchema,
-  UploadBuilder,
-  UploadCompleteArgs,
-  UploadErrorArgs,
-  UploadHandler,
-  UploadHandlerOptions,
-  UploadRouteDefinition,
-  UploadRouteOptions,
-} from "./handler";
-export type { ServedConstraints, UploadedBlob, UploadFile } from "./wire";
-export { BlobError, type BlobErrorCode, type BlobErrorOptions } from "./errors";
-export type { RetryPolicy } from "./retry";
-export { uniquePath } from "./unique-path";
-export { formatBytes, type CacheOption, type Duration, type Size } from "./units";
+export { AgentFS, type AgentFSOptions } from "./agentfs.js";
+export { AgentFSError, type FsErrorCode, type FsSyscall } from "./errors.js";
+export { Filesystem, type FileHandle } from "./fs.js";
+export { KvStore } from "./kv.js";
+export { ToolCalls, type ToolCall } from "./tools.js";
+export {
+  DEFAULT_DIR_MODE,
+  DEFAULT_FILE_MODE,
+  S_IFDIR,
+  S_IFLNK,
+  S_IFMT,
+  S_IFREG,
+  createStats,
+  type DirEntry,
+  type FilesystemStats,
+  type Stats,
+  type StatsData,
+} from "./stats.js";
+export type { Diff, Restored, SignedLink, Snapshot } from "./wire.js";
