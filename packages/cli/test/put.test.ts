@@ -22,7 +22,7 @@ const MB = 1024 * 1024;
 const PART_BYTES = 32 * MB;
 // The CLI sends a file in parts above 90 MB, whatever the plan. This one is the first size that does.
 const BIG_BYTES = 90 * MB + 1;
-const plan = { name: "pro", maxFileBytes: 5 * 1024 * 1024 * MB };
+const plan = { name: "pro", maxFileBytes: 800 * 1024 * MB };
 
 const bigBody = (tag: string, size = BIG_BYTES) => {
   const bytes = Buffer.alloc(size);
@@ -40,11 +40,9 @@ const changeAfterConflict = new Set<string>();
 const linkKeys: string[] = [];
 const inProgressOnce = { armed: false };
 const expiries = new Map<string, string | null>();
-const URL_BATCH = 2;
-const storage = { generation: 0, valid: 0, expireAfterStart: false };
-const storageWrites: number[] = [];
-const storageCredentials: (string | null)[] = [];
-const partListings: number[] = [];
+const partWrites: number[] = [];
+const partAuthorizations: (string | null)[] = [];
+const partFailures = new Map<number, number>();
 const started: string[] = [];
 const completed: { partNumber: number; etag: string }[][] = [];
 
@@ -70,12 +68,6 @@ const entryOf = (path: string, sha256: string, request: Request) => ({
   verified: true,
   url: new URL(`/files/${path}`, request.url).href,
 });
-
-const storageUrl = (request: Request, partNumber: number) =>
-  new URL(`/storage/${partNumber}?generation=${storage.generation}`, request.url).href;
-
-const storageUrls = (request: Request, from: number) =>
-  Array.from({ length: URL_BATCH }, (_, index) => storageUrl(request, from + index));
 
 const server = Bun.serve({
   port: 0,
@@ -150,18 +142,11 @@ const server = Bun.serve({
       }),
     "/v1/uploads": {
       POST: async (request) => {
-        const { path, direct } = z
-          .object({ path: z.string(), direct: z.boolean().optional() })
-          .parse(await request.json());
+        const { path } = z.object({ path: z.string() }).parse(await request.json());
         expiries.set(path, request.headers.get("x-agentfs-ttl"));
-        started.push(`${path}:${direct}`);
-        const partUrls = storageUrls(request, 1);
-        if (storage.expireAfterStart) {
-          storage.generation = 1;
-          storage.valid = 1;
-        }
+        started.push(path);
         return Response.json(
-          { upload: crypto.randomUUID(), uploadId: "upload-1", partBytes: PART_BYTES, partUrls },
+          { upload: crypto.randomUUID(), uploadId: "upload-1", partBytes: PART_BYTES },
           { status: 201 },
         );
       },
@@ -173,10 +158,17 @@ const server = Bun.serve({
         const error = { code: "upload_failed", message: "gone", retryAfter: null };
         return Response.json({ error }, { status: 409 });
       }
-      if (last === "parts") {
-        const from = Number(url.searchParams.get("from"));
-        partListings.push(from);
-        return Response.json({ from, partUrls: storageUrls(request, from) });
+      if (request.method === "PUT") {
+        const partNumber = Number(last);
+        partAuthorizations.push(request.headers.get("authorization"));
+        const failuresLeft = partFailures.get(partNumber) ?? 0;
+        if (failuresLeft > 0) {
+          partFailures.set(partNumber, failuresLeft - 1);
+          return new Response("storage hiccup", { status: 500 });
+        }
+        parts.set(partNumber, await request.arrayBuffer());
+        partWrites.push(partNumber);
+        return Response.json({ partNumber, etag: `"etag-${partNumber}"` });
       }
       const { path, sha256, parts: listed } = z
         .object({
@@ -193,19 +185,6 @@ const server = Bun.serve({
       files.set(path, sha256);
       uploads.push(path);
       return Response.json({ ...entryOf(path, sha256, request), verified: false, status: "uploaded" });
-    },
-    "/storage/*": {
-      PUT: async (request) => {
-        const url = new URL(request.url);
-        const partNumber = Number(url.pathname.split("/").pop());
-        storageCredentials.push(request.headers.get("authorization"));
-        if (Number(url.searchParams.get("generation")) < storage.valid) {
-          return new Response("expired", { status: 403 });
-        }
-        parts.set(partNumber, await request.arrayBuffer());
-        storageWrites.push(partNumber);
-        return new Response(null, { headers: { etag: `"etag-${partNumber}"` } });
-      },
     },
     "/files/*": (request) => {
       const path = decodeURIComponent(new URL(request.url).pathname.slice("/files/".length));
@@ -225,7 +204,7 @@ afterEach(async () => {
   await Promise.all(scratch.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
   for (const [sha256, bytes] of blobs) if (bytes.byteLength > MB) blobs.delete(sha256);
   plan.name = "pro";
-  plan.maxFileBytes = 5 * 1024 * MB * MB;
+  plan.maxFileBytes = 800 * 1024 * MB;
 });
 
 const config = await mkdtemp(join(tmpdir(), "agentfs-config-"));
@@ -308,7 +287,7 @@ test("put skips what .gitignore ignores and files that look like secrets", async
   expect(result.stderr).toContain("skipped 1 files that look like secrets: app/.env");
 });
 
-test("on a plan with a 5 TB file cap, a file above 90 MB goes up in parts and comes back whole", async () => {
+test("on a plan with an 800 GB file cap, a file above 90 MB goes up in parts and comes back whole", async () => {
   parts.clear();
   const body = bigBody("large");
   await agentfs("put", await makeFolder("large", { "data.bin": body }));
@@ -325,7 +304,7 @@ test("exactly 90 MB goes up in one request and one byte more goes up in parts", 
   const result = await agentfs("put", folder);
   expect(result.code).toBe(0);
   expect(uploads.toSorted()).toEqual(["edge/above.bin", "edge/exact.bin"]);
-  expect(started).toEqual(["edge/above.bin:true"]);
+  expect(started).toEqual(["edge/above.bin"]);
 });
 
 test("a file above the plan's file cap is refused before any bytes are sent", async () => {
@@ -353,7 +332,7 @@ test("a resume state for an upload the server no longer has starts a new upload"
   const body = bigBody("stale");
   const folder = await makeFolder("stale", { "data.bin": body });
   const sha256 = sha256Of(body);
-  const state = { upload: crypto.randomUUID(), uploadId: "stale", partBytes: PART_BYTES, direct: true, done: [] };
+  const state = { upload: crypto.randomUUID(), uploadId: "stale", partBytes: PART_BYTES, done: [] };
   await mkdir(join(config, "agentfs", "uploads"), { recursive: true });
   await writeFile(join(config, "agentfs", "uploads", `test-${sha256}.json`), JSON.stringify(state));
 
@@ -424,26 +403,22 @@ test("put --ttl sets the expiry on single, multipart and linked files", async ()
   });
 });
 
-const resetStorage = () => {
+const resetParts = () => {
   parts.clear();
-  storage.generation = 0;
-  storage.valid = 0;
-  storage.expireAfterStart = false;
-  storageWrites.length = 0;
-  storageCredentials.length = 0;
-  partListings.length = 0;
+  partWrites.length = 0;
+  partAuthorizations.length = 0;
+  partFailures.clear();
   started.length = 0;
   completed.length = 0;
 };
 
-test("parts go straight to the storage URLs with no credentials and complete with the ETags as returned", async () => {
-  resetStorage();
-  const result = await agentfs("put", await makeFolder("direct", { "data.bin": bigBody("direct") }), "--json");
+test("parts go to the API with the key and complete with the ETags as returned", async () => {
+  resetParts();
+  const result = await agentfs("put", await makeFolder("api", { "data.bin": bigBody("api") }), "--json");
   expect(result.code).toBe(0);
-  expect(started).toEqual(["direct/data.bin:true"]);
-  expect(partListings).toEqual([3]);
-  expect(storageWrites.toSorted()).toEqual([1, 2, 3]);
-  expect(storageCredentials).toEqual([null, null, null]);
+  expect(started).toEqual(["api/data.bin"]);
+  expect(partWrites.toSorted()).toEqual([1, 2, 3]);
+  expect(partAuthorizations).toEqual(["Bearer afs_test", "Bearer afs_test", "Bearer afs_test"]);
   expect(completed).toEqual([
     [
       { partNumber: 1, etag: '"etag-1"' },
@@ -454,43 +429,52 @@ test("parts go straight to the storage URLs with no credentials and complete wit
   expect(JSON.parse(result.stdout).verified).toBe(false);
 });
 
-test("a 403 from storage fetches fresh URLs for the part and carries on", async () => {
-  resetStorage();
-  storage.expireAfterStart = true;
-  const result = await agentfs("put", await makeFolder("expired", { "data.bin": bigBody("expired") }));
+test("a part the server fails once is sent again and the upload carries on", async () => {
+  resetParts();
+  partFailures.set(2, 1);
+  const result = await agentfs("put", await makeFolder("hiccup", { "data.bin": bigBody("hiccup") }));
   expect(result.code).toBe(0);
-  expect(storageWrites.toSorted()).toEqual([1, 2, 3]);
-  expect(storageCredentials.length).toBeGreaterThan(3);
-  expect(partListings.toSorted()).toEqual([1, 3]);
-  expect(completed[0]?.map(({ partNumber }) => partNumber)).toEqual([1, 2, 3]);
+  expect(partWrites.toSorted()).toEqual([1, 2, 3]);
+  expect(partAuthorizations.length).toBe(4);
 });
 
-test("a resume fetches fresh URLs and sends only the parts that are left", async () => {
-  resetStorage();
-  const body = bigBody("resumed");
-  const folder = await makeFolder("resumed", { "data.bin": body });
-  const sha256 = sha256Of(body);
-  const bytes = new Uint8Array(body.buffer, body.byteOffset, body.length);
-  parts.set(1, bytes.slice(0, PART_BYTES).buffer);
-  parts.set(2, bytes.slice(PART_BYTES, PART_BYTES * 2).buffer);
+test("an interrupted upload resumes and sends only the parts that are left", async () => {
+  resetParts();
+  const body = bigBody("interrupted");
+  const folder = await makeFolder("interrupted", { "data.bin": body });
+  partFailures.set(3, 3);
+  const interrupted = await agentfs("put", folder);
+  expect(interrupted.code).toBe(1);
+  expect(partWrites.toSorted()).toEqual([1, 2]);
+  expect(await readdir(join(config, "agentfs", "uploads"))).toEqual([`test-${sha256Of(body)}.json`]);
+
+  partWrites.length = 0;
+  started.length = 0;
+  const resumed = await agentfs("put", folder);
+  expect(resumed.stderr).toContain("1 uploaded");
+  expect(started).toEqual([]);
+  expect(partWrites).toEqual([3]);
+  expect(completed.at(-1)?.map(({ etag }) => etag)).toEqual(['"etag-1"', '"etag-2"', '"etag-3"']);
+  expect(sha256Of(new Uint8Array(blobs.get(sha256Of(body)) ?? new ArrayBuffer(0)))).toBe(sha256Of(body));
+  expect(await readdir(join(config, "agentfs", "uploads"))).toEqual([]);
+});
+
+test("a resume file an older CLI wrote for storage URLs is ignored and the upload starts again", async () => {
+  resetParts();
+  const body = bigBody("older");
+  const folder = await makeFolder("older", { "data.bin": body });
   const state = {
     upload: crypto.randomUUID(),
     uploadId: "upload-1",
-    partBytes: PART_BYTES,
+    partBytes: 525 * MB,
     direct: true,
-    done: [
-      { partNumber: 1, etag: '"etag-1"' },
-      { partNumber: 2, etag: '"etag-2"' },
-    ],
+    done: [{ partNumber: 1, etag: '"etag-1"' }],
   };
   await mkdir(join(config, "agentfs", "uploads"), { recursive: true });
-  await writeFile(join(config, "agentfs", "uploads", `test-${sha256}.json`), JSON.stringify(state));
+  await writeFile(join(config, "agentfs", "uploads", `test-${sha256Of(body)}.json`), JSON.stringify(state));
 
   const result = await agentfs("put", folder);
   expect(result.stderr).toContain("1 uploaded");
-  expect(started).toEqual([]);
-  expect(partListings).toEqual([3]);
-  expect(storageWrites).toEqual([3]);
-  expect(completed[0]?.map(({ etag }) => etag)).toEqual(['"etag-1"', '"etag-2"', '"etag-3"']);
-  expect(sha256Of(new Uint8Array(blobs.get(sha256) ?? new ArrayBuffer(0)))).toBe(sha256);
+  expect(started).toEqual(["older/data.bin"]);
+  expect(partWrites.toSorted()).toEqual([1, 2, 3]);
 });

@@ -8,7 +8,7 @@ import { formatBytes } from "./units";
 
 const BATCH = 1000;
 
-/** A file above this many bytes goes up in parts. The server refuses a direct upload at or below it, and it is the same on every plan. */
+/** A file above this many bytes goes up in parts, the same on every plan. One request carries at most this much. */
 const PARTS_ABOVE_BYTES = 90 * 1024 * 1024;
 
 export type PutOutcome =

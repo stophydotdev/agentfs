@@ -137,9 +137,7 @@ const started = z.object({
   upload: z.string(),
   uploadId: z.string(),
   partBytes: z.number(),
-  partUrls: z.array(z.string()).default([]),
 });
-const partUrlPage = z.object({ from: z.number(), partUrls: z.array(z.string()) });
 const part = z.object({ partNumber: z.number(), etag: z.string() });
 const forked = z.object({ from: z.string(), to: z.string(), copied: z.number() });
 const signedLink = z.object({ url: z.string(), expiresAt: z.string() });
@@ -281,15 +279,6 @@ const send = async (path: string, init?: RequestInit) => {
     await new Promise((done) => setTimeout(done, (error.retryAfter ?? 1) * 1000));
     return attempt(path, keyed);
   });
-};
-
-export const putToUrl = async (url: string, body: Blob) => {
-  const response = await fetch(url, { method: "PUT", body, headers: clientHeaders() });
-  if (response.status === 403) return { kind: "forbidden" as const };
-  if (!response.ok) throw new ApiError(String(response.status), response.statusText, null, null, response.status);
-  const etag = response.headers.get("etag");
-  if (etag === null) throw new ApiError("no_etag", "the storage service sent no ETag for the part");
-  return { kind: "ok" as const, etag };
 };
 
 export const report = async (url: string, reason: string) =>
@@ -445,18 +434,14 @@ export const connect = async (given?: { key: string; source: KeySource }) => {
         await (
           await send("/v1/uploads", {
             method: "POST",
-            body: JSON.stringify({ path, sha256, size, direct: true }),
+            body: JSON.stringify({ path, sha256, size }),
             headers: { ...headers, ...expiry(ttlSeconds), "content-type": "application/json" },
           })
         ).json(),
       ),
-    partUrls: async (upload: string, uploadId: string, from: number) =>
-      partUrlPage.parse(
-        await (
-          await send(`${uploadPath(upload, uploadId)}/parts?${new URLSearchParams({ from: String(from) })}`, {
-            headers,
-          })
-        ).json(),
+    putPart: async (upload: string, uploadId: string, partNumber: number, body: Blob) =>
+      part.parse(
+        await (await send(`${uploadPath(upload, uploadId)}/${partNumber}`, { method: "PUT", body, headers })).json(),
       ),
     completeUpload: async (
       upload: string,
