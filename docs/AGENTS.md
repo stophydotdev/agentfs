@@ -34,7 +34,7 @@
 - Plain words and short sentences. One idea per sentence.
 - Use active voice and second person ("you").
 - No em dashes. No hype. No marketing words.
-- No prices. Name the plans and their limits, and link to https://agentfs.cloud/pricing for prices. Never write an amount of money.
+- No prices. Name the plans and their limits, and link to https://agentfs.cloud/#pricing for prices. Never write an amount of money.
 - Use sentence case for headings.
 - Open each page with one sentence: what it does for the reader. Then code they can paste. Then one to three sentences.
 - State exact behavior: the error, the limit, what an empty result looks like.
