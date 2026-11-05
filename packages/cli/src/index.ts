@@ -757,12 +757,12 @@ const keyless = {
     const scope = key.scoped ? "scoped" : "full";
     const where = found.source === "env" ? "AGENTFS_KEY" : keyFile;
     if (json) {
-      print(JSON.stringify({ key: where, account: api.account, claimed: limits.owner !== null, owner: limits.owner, expiresAt: limits.expiresAt, keyId: key.id, keyExpiresAt: key.expiresAt, prefix: key.prefix, permissions: key.permissions, plan: limits.plan, tier: limits.tier, ownerUsedBytes: limits.ownerUsedBytes, ownerLimitBytes: limits.ownerLimitBytes, usedBytes: limits.usedBytes, capBytes: limits.capBytes, files: limits.files, scope }));
+      print(JSON.stringify({ key: where, account: limits.account, claimed: limits.owner !== null, owner: limits.owner, expiresAt: limits.expiresAt, keyId: key.id, keyExpiresAt: key.expiresAt, prefix: key.prefix, permissions: key.permissions, plan: limits.plan, tier: limits.tier, ownerUsedBytes: limits.ownerUsedBytes, ownerLimitBytes: limits.ownerLimitBytes, usedBytes: limits.usedBytes, capBytes: limits.capBytes, files: limits.files, scope }));
       return;
     }
     print(`key       ${found.source === "env" ? "from AGENTFS_KEY" : `saved in ${keyFile}`}`);
     print(
-      `account   ${api.account} (${key.scoped ? `scoped key: ${key.prefix || "everything"}, ${key.permissions.join(",")}` : "full key"})`,
+      `account   ${limits.account} (${key.scoped ? `scoped key: ${key.prefix || "everything"}, ${key.permissions.join(",")}` : "full key"})`,
     );
     if (key.expiresAt !== null) print(`key ends  ${key.expiresAt}`);
     print(`owner     ${limits.owner === null ? "nobody yet; run agentfs claim to keep these files" : limits.owner}`);
@@ -775,9 +775,9 @@ const keyless = {
     const key = (await readStdin()).trim();
     if (key === "") throw new UsageError("no key on stdin");
     const api = await connect({ key, source: "file" });
-    await api.limits();
+    const { account } = await api.limits();
     await saveKey(key);
-    print(json ? JSON.stringify({ account: api.account, key: keyFile }) : `logged in as ${api.account}; the key is in ${keyFile}`);
+    print(json ? JSON.stringify({ account, key: keyFile }) : `logged in as ${account}; the key is in ${keyFile}`);
   },
   logout: async () => {
     await rm(keyFile, { force: true });

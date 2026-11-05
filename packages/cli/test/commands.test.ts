@@ -36,7 +36,7 @@ afterAll(() => server.stop());
 
 const config = await mkdtemp(join(tmpdir(), "agentfs-config-"));
 const agentfs = runner(server, config);
-script.set("POST /v1/signup", () => Response.json({ key: "afs_test.1.x" }, { status: 201 }));
+script.set("POST /v1/signup", () => Response.json({ key: "afs_TestTestTestTestTestTestTestTest" }, { status: 201 }));
 
 beforeEach(() => {
   seen.length = 0;
@@ -282,7 +282,7 @@ test("timeline with no filter sends no empty filter, which the server would matc
 test("a scoped key is made with the folder, permissions and lifetime asked for", async () => {
   const made = {
     id: "key_1",
-    key: "afs_scoped.1.x",
+    key: "afs_ScopedScopedScopedScopedScopedSc",
     prefix: "reports/",
     permissions: ["read", "write"],
     expiresAt: "2026-10-29T01:00:00.000Z",
@@ -294,7 +294,7 @@ test("a scoped key is made with the folder, permissions and lifetime asked for",
     permissions: ["read", "write"],
     ttlSeconds: 3600,
   });
-  expect(result.stdout).toBe("afs_scoped.1.x\n");
+  expect(result.stdout).toBe("afs_ScopedScopedScopedScopedScopedSc\n");
 
   const json = await agentfs("key", "create", "--read", "--json");
   expect(JSON.parse(json.stdout)).toEqual(made);
@@ -388,6 +388,7 @@ test("run pulls the inputs, runs the command, and puts the outputs even when it 
   script.set("GET /blob/a.txt", () => new Response("alpha"));
   script.set("GET /v1/limits", () =>
     Response.json({
+      account: "acct",
       key: { id: "key_1", scoped: false, prefix: "", permissions: ["read", "write", "delete"], expiresAt: null },
       plan: "free",
       tier: "unclaimed",
@@ -537,6 +538,7 @@ const fullKey: KeyInfo = { id: "key_1", scoped: false, prefix: "", permissions: 
 const GB = 1024 ** 3;
 
 const limitsBody = (owner: string | null, key: KeyInfo = fullKey) => ({
+  account: "acct",
   key,
   plan: "free",
   tier: owner === null ? "unclaimed" : "claimed",
@@ -608,7 +610,7 @@ test("status shows the key, account, owner and usage, and --check only sets the 
   expect((await run("status", "--check")).code).toBe(1);
   expect(seen.map(({ path }) => path)).toEqual([]);
 
-  await run.stdin("afs_acct.1.x\n", "login", "--key-stdin");
+  await run.stdin("afs_AcctAcctAcctAcctAcctAcctAcctAcct\n", "login", "--key-stdin");
   const result = await run("status");
   expect(result.stdout).toContain("account   acct (full key)\n");
   expect(result.stdout).toContain("owner     nobody yet; run agentfs claim to keep these files\n");
@@ -632,10 +634,10 @@ test("login saves a key read from stdin after one validating call, and logout de
   const refused = await run("login");
   expect(refused.code).toBe(2);
 
-  const result = await run.stdin("afs_acct.1.x\n", "login", "--key-stdin");
+  const result = await run.stdin("afs_AcctAcctAcctAcctAcctAcctAcctAcct\n", "login", "--key-stdin");
   expect(result.stdout).toBe(`logged in as acct; the key is in ${join(dir, "agentfs", "key")}\n`);
-  expect(seen.filter(({ path }) => path === "/v1/limits").map(({ headers }) => headers.get("authorization"))).toEqual(["Bearer afs_acct.1.x"]);
-  expect(await readFile(join(dir, "agentfs", "key"), "utf8")).toBe("afs_acct.1.x");
+  expect(seen.filter(({ path }) => path === "/v1/limits").map(({ headers }) => headers.get("authorization"))).toEqual(["Bearer afs_AcctAcctAcctAcctAcctAcctAcctAcct"]);
+  expect(await readFile(join(dir, "agentfs", "key"), "utf8")).toBe("afs_AcctAcctAcctAcctAcctAcctAcctAcct");
 
   expect((await run("logout")).stdout).toBe("logged out\n");
   expect((await run("status", "--check")).code).toBe(1);
@@ -691,7 +693,7 @@ test("in a terminal the confirmation asks first, and only y goes ahead", async (
     let out = "";
     let answered = false;
     const child = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "index.ts"), "rm", "-r", "old"], {
-      env: { ...process.env, AGENTFS_URL: server.url.href, AGENTFS_KEY: "afs_t.1.x" },
+      env: { ...process.env, AGENTFS_URL: server.url.href, AGENTFS_KEY: "afs_TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT" },
       terminal: {
         cols: 100,
         rows: 10,
@@ -738,18 +740,18 @@ test("rm, key rotate, feedback, claim and the other text-only commands print one
   expect((await agentfs.piped("key", "revoke", "key_1")).stdout).toBe('{"id":"key_1","revoked":true}\n');
 
   script.set("GET /v1/limits", () => Response.json(limitsBody("hussein")));
-  script.set("POST /v1/keys/rotate", () => Response.json({ key: "afs_new.1.x" }));
+  script.set("POST /v1/keys/rotate", () => Response.json({ key: "afs_NewNewNewNewNewNewNewNewNewNewNe" }));
   const dir = await mkdtemp(join(tmpdir(), "agentfs-config-"));
   const run = runner(server, dir);
-  await run.stdin("afs_acct.1.x\n", "login", "--key-stdin");
+  await run.stdin("afs_AcctAcctAcctAcctAcctAcctAcctAcct\n", "login", "--key-stdin");
   const rotated = await run.piped("key", "rotate");
   expect(rotated.stdout).toBe(`{"rotated":true,"saved":true,"file":"${join(dir, "agentfs", "key")}"}\n`);
-  expect(await readFile(join(dir, "agentfs", "key"), "utf8")).toBe("afs_new.1.x");
+  expect(await readFile(join(dir, "agentfs", "key"), "utf8")).toBe("afs_NewNewNewNewNewNewNewNewNewNewNe");
 });
 
 test("limits and status show the plan, and free_storage_full prints the server's message", async () => {
   const run = await freshConfig();
-  await run.stdin("afs_acct.1.x\n", "login", "--key-stdin");
+  await run.stdin("afs_AcctAcctAcctAcctAcctAcctAcctAcct\n", "login", "--key-stdin");
   script.set("GET /v1/limits", () => Response.json(limitsBody("Hussein")));
   const shown = (await run("limits")).stdout;
   expect(shown).toContain("plan free: 3 GB of 10 GB used across your accounts\n");
@@ -793,7 +795,7 @@ const withEnv = (env: Record<string, string>, cwd: string, ...args: string[]) =>
 test("a 0.0.2 login with no key stops instead of signing up a new account", async () => {
   const home = await mkdtemp(join(tmpdir(), "agentfs-legacy-"));
   await mkdir(join(home, "agentfs"));
-  await writeFile(join(home, "agentfs", "credentials.json"), '{"apiKey":"afs_old.1.x"}');
+  await writeFile(join(home, "agentfs", "credentials.json"), '{"apiKey":"afs_OldOldOldOldOldOldOldOldOldOldOl"}');
   const result = await withEnv({ XDG_CONFIG_HOME: home, AGENTFS_URL: server.url.href }, home, "kv", "get", "a");
   expect(result.code).toBe(2);
   expect(result.stderr).toBe(
@@ -806,7 +808,7 @@ test("AGENTFS_API_URL, the 0.0.2 name, works when AGENTFS_URL is not set", async
   script.set("GET /v1/limits", () => Response.json(limitsBody(null)));
   const home = await mkdtemp(join(tmpdir(), "agentfs-alias-"));
   const result = await withEnv(
-    { XDG_CONFIG_HOME: home, AGENTFS_API_URL: server.url.href, AGENTFS_KEY: "afs_acct.1.x" },
+    { XDG_CONFIG_HOME: home, AGENTFS_API_URL: server.url.href, AGENTFS_KEY: "afs_AcctAcctAcctAcctAcctAcctAcctAcct" },
     home,
     "limits",
   );
@@ -819,7 +821,7 @@ test("an empty XDG_CONFIG_HOME saves the key under the home folder, not the curr
   const cwd = await mkdtemp(join(tmpdir(), "agentfs-cwd-"));
   const result = await withEnv({ XDG_CONFIG_HOME: "", HOME: home, AGENTFS_URL: server.url.href }, cwd, "kv", "get", "a");
   expect(result.stderr).toContain(`Signed up. Your key is in ${join(home, ".config", "agentfs", "key")}\n`);
-  expect(await readFile(join(home, ".config", "agentfs", "key"), "utf8")).toBe("afs_test.1.x");
+  expect(await readFile(join(home, ".config", "agentfs", "key"), "utf8")).toBe("afs_TestTestTestTestTestTestTestTest");
   expect(await Array.fromAsync(new Bun.Glob("**/*").scan({ cwd }))).toEqual([]);
 });
 
@@ -827,7 +829,7 @@ test("the key goes only over HTTPS, or HTTP to localhost and 127.x", async () =>
   script.set("GET /v1/limits", () => Response.json(limitsBody(null)));
   const home = await mkdtemp(join(tmpdir(), "agentfs-https-"));
   const run = (url: string) =>
-    withEnv({ XDG_CONFIG_HOME: home, AGENTFS_URL: url, AGENTFS_KEY: "afs_acct.1.x" }, home, "limits");
+    withEnv({ XDG_CONFIG_HOME: home, AGENTFS_URL: url, AGENTFS_KEY: "afs_AcctAcctAcctAcctAcctAcctAcctAcct" }, home, "limits");
   for (const url of ["http://example.com", "http://localhost.evil.com", "http://127.evil.com"]) {
     const result = await run(url);
     expect(result.code).toBe(2);
@@ -903,17 +905,17 @@ test("ls --search sends q, and lists only matching paths even when the server ig
 test("mcp prints the full key and says so, or makes a key for one folder and says which", async () => {
   script.set("GET /v1/limits", () => Response.json(limitsBody("hussein")));
   const run = await freshConfig();
-  await run.stdin("afs_acct.1.full\n", "login", "--key-stdin");
+  await run.stdin("afs_FullFullFullFullFullFullFullFull\n", "login", "--key-stdin");
   const full = await run("mcp");
-  expect(JSON.parse(full.stdout).mcpServers.agentfs.headers.Authorization).toBe("Bearer afs_acct.1.full");
+  expect(JSON.parse(full.stdout).mcpServers.agentfs.headers.Authorization).toBe("Bearer afs_FullFullFullFullFullFullFullFull");
   expect(full.stderr).toStartWith("key: your full key, which opens every folder and can do everything.");
 
-  const made = { id: "key_7", key: "afs_acct.1.scoped", prefix: "runs/t1/", permissions: ["read", "write"], expiresAt: "2026-11-04T00:00:00.000Z" };
+  const made = { id: "key_7", key: "afs_ScopeScopeScopeScopeScopeScopeSc", prefix: "runs/t1/", permissions: ["read", "write"], expiresAt: "2026-11-04T00:00:00.000Z" };
   script.set("POST /v1/keys", () => Response.json(made, { status: 201 }));
   const scoped = await run("mcp", "--prefix", "runs/t1", "--ttl", "1d");
   expect(JSON.parse(lastRequest()?.body ?? "")).toEqual({ prefix: "runs/t1/", permissions: ["read", "write"], ttlSeconds: 86400 });
-  expect(JSON.parse(scoped.stdout).mcpServers.agentfs.headers.Authorization).toBe("Bearer afs_acct.1.scoped");
-  expect(scoped.stdout).not.toContain("afs_acct.1.full");
+  expect(JSON.parse(scoped.stdout).mcpServers.agentfs.headers.Authorization).toBe("Bearer afs_ScopeScopeScopeScopeScopeScopeSc");
+  expect(scoped.stdout).not.toContain("afs_FullFullFullFullFullFullFullFull");
   expect(scoped.stderr).toBe("key: a new scoped key, key_7: runs/t1/, read,write, ends 2026-11-04T00:00:00.000Z. Stop it with agentfs key revoke key_7.\n");
 });
 

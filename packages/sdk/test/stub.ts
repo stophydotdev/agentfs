@@ -75,7 +75,7 @@ export const startStub = (options: StubOptions = {}) => {
 
       if (request.method === "POST" && url.pathname === "/v1/signup") {
         seen.signups += 1;
-        return reply({ key: `afs_${ACCOUNT}.0.${"a".repeat(64)}` }, 201);
+        return reply({ key: `afs_${"a".repeat(32)}` }, 201);
       }
 
       if (url.pathname.startsWith(`/${ACCOUNT}/`)) {

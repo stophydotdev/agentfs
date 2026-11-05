@@ -52,7 +52,9 @@ agentfs key revoke <id>
 
 `key list` shows each key's id, folder, permissions, expiry, last four characters and whether it is revoked. A revoked key returns `key_revoked`.
 
-`agentfs key rotate` replaces your full key. The old one stops working at once, and so does every scoped key.
+`agentfs key rotate` replaces your full key. The old one stops working at once and returns `key_revoked`, and so does every scoped key made before it.
+
+A key from before the 1.0 format, a long one with dots in it, returns `key_format_changed`. Make a new key in the dashboard at https://agentfs.cloud, then run `agentfs login --key-stdin`.
 
 ## Check which key you have
 

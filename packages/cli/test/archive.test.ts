@@ -92,9 +92,10 @@ const fakeServer = (seed: { files: Record<string, Uint8Array>; kv: Record<string
   const server = Bun.serve({
     port: 0,
     routes: {
-      "/v1/signup": { POST: () => Response.json({ key: "afs_test" }, { status: 201 }) },
+      "/v1/signup": { POST: () => Response.json({ key: "afs_TestTestTestTestTestTestTestTest" }, { status: 201 }) },
       "/v1/limits": () =>
         Response.json({
+          account: "acct",
           key: { id: "key_1", scoped: false, prefix: "", permissions: ["read", "write", "delete"], expiresAt: null },
           plan: "free",
           tier: "unclaimed",

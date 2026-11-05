@@ -394,6 +394,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "account": {
+                      "type": "string"
+                    },
                     "plan": {
                       "type": "string"
                     },
@@ -494,6 +497,7 @@
                     }
                   },
                   "required": [
+                    "account",
                     "plan",
                     "usedBytes",
                     "files",
@@ -565,6 +569,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "account": {
+                      "type": "string"
+                    },
                     "plan": {
                       "type": "string"
                     },
@@ -665,6 +672,7 @@
                     }
                   },
                   "required": [
+                    "account",
                     "plan",
                     "usedBytes",
                     "files",
@@ -4177,6 +4185,7 @@
                 "type": "string",
                 "enum": [
                   "unauthorized",
+                  "key_format_changed",
                   "invalid_path",
                   "invalid_sha256",
                   "sha256_mismatch",
@@ -4257,6 +4266,11 @@
       "code": "unauthorized",
       "status": 401,
       "message": "Send a valid key as `Authorization: Bearer <key>`. Your keys are in the dashboard at https://agentfs.cloud."
+    },
+    {
+      "code": "key_format_changed",
+      "status": 401,
+      "message": "AgentFS keys changed format and this key no longer works. Make a new key in the dashboard at https://agentfs.cloud, then run agentfs login --key-stdin."
     },
     {
       "code": "invalid_path",
