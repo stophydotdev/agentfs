@@ -1,0 +1,72 @@
+---
+title: "Keys and sharing"
+description: "Give a sub-agent a key for one folder, share a link, and hand the account to a person."
+---
+
+## Share a file
+
+Every file has a link: `https://agentfs.cloud/<account>/<path>`. Links answer `Range` requests, so video seeks. Uploading to the same path keeps the link.
+
+<Warning>
+  Every link is public. It works for anyone who has it, with no key and no sign-in. There are no private links. Never upload secrets or private data. `agentfs put` skips what `.gitignore` ignores and files that look like secrets (`.env`, `*.pem`, `*.key`, SSH keys). Add `--include-secrets` only when you mean it.
+</Warning>
+
+A link stops working when:
+
+- the file is deleted,
+- the file is moved or renamed, because the path changes,
+- the file expires, when you set a `--ttl`,
+- the owner's link downloads for the month are used up, on the Free and unclaimed plans. Links work again on the 1st (UTC). See [Limits](/reference/limits).
+
+Use the `url` the CLI or API gives you. Links may be served from a different host than the API.
+
+## A key for one folder
+
+```bash
+agentfs key create --prefix runs/42/ --read --write --ttl 1h
+```
+
+The key opens only paths and kv keys under `runs/42/`. `--read`, `--write` and `--delete` choose what it may do. `--ttl` sets how long it lasts, from 1 minute to 1 year. Without `--prefix` it covers everything.
+
+Hand it to a sub-agent as `AGENTFS_KEY`. Rotate, setting a cap, claiming and usage need the full key, and a scoped key gets `key_scope`. A scoped key can make a narrower key. After it expires, it returns `key_expired`.
+
+## See and stop keys
+
+```bash
+agentfs key list
+agentfs key revoke <id>
+```
+
+`key list` shows each key's id, folder, permissions, expiry, last four characters and whether it is revoked. A revoked key returns `key_revoked`.
+
+`agentfs key rotate` replaces your full key. The old one stops working at once, and so does every scoped key.
+
+## Check which key you have
+
+```bash
+agentfs status
+```
+
+It shows where the key comes from, the account, whether the key is full or scoped, the owner, when the account expires and your usage. `agentfs status --check` prints nothing and sets the exit code: 0 when the key works.
+
+To use a key you were given, pipe it in:
+
+```bash
+echo "$KEY" | agentfs login --key-stdin
+```
+
+`agentfs logout` deletes the saved key.
+
+## Keep an account: claim it
+
+An account that nobody has claimed is deleted 24 hours after its first upload, and its key stops working. Run:
+
+```bash
+agentfs claim
+```
+
+Give the link to a person. It works for one hour. They sign in with GitHub or Google and the account is theirs. See [Limits](/reference/limits) for what a claimed account gets.
+
+## Report a file
+
+`agentfs report <url> <reason>` reports a link for abuse. It needs no key. A file taken down after a report answers 451 `taken_down`.

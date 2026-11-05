@@ -1,0 +1,57 @@
+---
+title: "Reliability and history"
+description: "What agentfs keeps, for how long, and what you can bring back."
+---
+
+See what agentfs keeps, for how long, and what you can bring back.
+
+Deleted files and the timeline are kept for the history window of your plan. See [Limits](/reference/limits) for the days. agentfs has no backup you can restore from, apart from the snapshots you take.
+
+## What we keep
+
+| What | For how long |
+|---|---|
+| A deleted or expired file's bytes | The history window of your plan. Bring the file back with `agentfs undelete <path>`. |
+| The timeline: who wrote what | The same history window. Older events are dropped. |
+| A snapshot | Until you delete it. |
+| The bytes a snapshot holds | As long as the snapshot exists, even if you delete the file. They count toward your usage. |
+| A response to a write with an `Idempotency-Key` | 24 hours. |
+| Files of an unclaimed account | 24 hours after its first upload. |
+
+## What you can bring back
+
+| You did | You can bring it back with | Until |
+|---|---|---|
+| Deleted a file, or it expired from its `--ttl` | `agentfs undelete <path>`. It restores the version the file had when it was deleted. | The history window ends |
+| Deleted or changed many files in a folder | `agentfs restore <snapshot>`, if you took a snapshot first | You delete the snapshot |
+| Overwrote a file | Nothing, unless a snapshot holds the old version. `undelete` does not bring back an overwritten version. | |
+| Deleted a whole unclaimed account, or it expired | Nothing. Its files and history go with it. | |
+
+`undelete` fails with `file_exists` when there is a file at that path now, and with `not_found` when nothing deleted at that path is left.
+
+## Two writers, no lost write
+
+Send `If-Match` or `If-None-Match` with a write and the server writes only if the file is as you expect. Otherwise you get 412 `precondition_failed` and nothing changes.
+
+`DELETE /v1/files/{path}` takes `If-Match` too, so you delete only the version you read. `agentfs put` does this for you. It reads the listing first, and a file that changed remotely since then is reported as `conflict` and the exit code is 3. Add `--force` to overwrite it.
+
+`agentfs sync` keeps both versions when both sides changed. See [Sync and watch](/guides/sync).
+
+## Retry without writing twice
+
+Every POST, PUT and DELETE takes an `Idempotency-Key` of 1 to 128 characters. Send the same key with the same request within 24 hours and you get the first response again, with the header `idempotent-replay: true`. Nothing is written twice.
+
+- The same key with a different request returns 422 `idempotency_key_reused`.
+- The same key while the first request still runs returns 409 `idempotency_in_progress`, with `retryAfter` set to 1.
+
+The CLI and the SDK add a fresh key to every write and retry once on `idempotency_in_progress`.
+
+## Find a request
+
+Every response has an `x-request-id` header, and every error body has a `requestId`. Quote it when you send feedback with `agentfs feedback`.
+
+## Undo a mistake
+
+- A deleted file: `agentfs undelete <path>`, within the history window.
+- A folder changed by a bad step: `agentfs restore <snapshot>`. Take the snapshot before the step.
+- A write that raced another: the 412 or `conflict` told you, and nothing was lost.

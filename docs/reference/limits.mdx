@@ -1,0 +1,91 @@
+---
+title: "Limits"
+description: "What each plan holds, and the size, count and time limits."
+---
+
+What each plan allows, and the size, count and time limits that apply to every account.
+
+## Plans
+
+Every account is on one plan. A new account is unclaimed. When a person claims it, it moves to Free. A person on Free can move to Pro. For prices, see [agentfs.cloud/pricing](https://agentfs.cloud/pricing).
+
+| | Unclaimed | Free | Pro |
+|---|---|---|---|
+| Storage | 1 GB | 2 GB, shared by all the accounts the person claimed | 500 GB, shared by all the accounts the person claimed |
+| Biggest file | 100 MB | 100 MB | 5 TB |
+| Link downloads | 10 GB a month | 10 GB a month | Unlimited, under fair use |
+| New files | 50,000 a month | 50,000 a month | 1,000,000 a month, under fair use |
+| History | 7 days | 7 days | 90 days |
+| Kept | Deleted 24 hours after its first upload, unless a person claims it | Until you delete it | Until you delete it |
+
+Sizes are 1024-based: 1 GB is 1,073,741,824 bytes. `agentfs` prints sizes the same way.
+
+Run `agentfs claim` and give the link to a person to move an account from Unclaimed to Free. An unclaimed account cannot move to Pro until it is claimed. Pro can hold more than 500 GB. The person sets how much more.
+
+New files are files at a path that did not exist this month. Overwriting a file does not count. History is how long deleted files and the timeline are kept. See [Reliability and history](/guides/reliability).
+
+When a limit is reached, the server answers with an error that names it: `free_storage_full`, `storage_full`, `monthly_files_full`, `pro_monthly_files_full`, `link_downloads_full` or `file_too_large`. See [Errors](/reference/errors).
+
+## Your numbers
+
+`agentfs limits` shows the numbers for your account. They come from `GET /v1/limits`:
+
+| Field | Meaning |
+|---|---|
+| `plan` | `unclaimed`, `free` or `pro`. |
+| `tier` | `unclaimed` or `claimed`. |
+| `usedBytes`, `capBytes` | What this account uses, and its cap. |
+| `ownerUsedBytes`, `ownerLimitBytes` | What the person who claimed it uses across all their accounts, and their limit. |
+| `maxFileBytes` | The biggest file your plan takes. It does not decide whether a file goes up in one request or in parts. |
+| `historyDays` | Days of history your plan keeps. |
+| `month` | This month's new files and link downloads, with their limits. `newFilesLimit` is the plan's count, and `linkBytesLimit` is `null` on Pro. |
+| `key` | The key you called with: `id`, `scoped`, `prefix`, `permissions` and `expiresAt`. |
+
+A lower cap that you set with `agentfs limits --cap 5GB` returns `storage_cap_reached` when you reach it.
+
+## Files
+
+| Limit | Value |
+|---|---|
+| Biggest file | `maxFileBytes`: 100 MB on Unclaimed and Free, 5 TB on Pro. A bigger file gets 413 `file_too_large`. |
+| One `PUT` | Up to 90 MB, on every plan |
+| Direct upload | Files above 90 MB, in parts of 525 MB. At or below 90 MB it is refused with `invalid_upload`. Presigned URLs last 6 hours. |
+| Upload in parts through the API | Parts of 90 MB, up to 10,000 parts, about 879 GB |
+| Path | 900 characters |
+
+## Requests
+
+| Limit | Value |
+|---|---|
+| Files in one batch (`POST /v1/files`) | 1000 |
+| Files in one list page | 1000 |
+| Parallel uploads in the CLI | 32 |
+| Signups | 10 a minute from one address |
+| Feedback | 5 a minute and 30 a day |
+| Events per page | 1000 |
+| Wait for events (`wait`) | 0 to 30 seconds |
+
+## Key-value store and tool calls
+
+| Limit | Value |
+|---|---|
+| kv value | JSON up to 64 KB |
+| kv key | 1 to 512 characters: letters, digits and `_ . : @ / -` |
+| Tool call `input` and `output` | JSON up to 64 KB each |
+
+## Time
+
+| What | For how long |
+|---|---|
+| Unclaimed account | 24 hours after the first upload |
+| Claim link | 1 hour |
+| Deleted file's bytes and the timeline | `historyDays`: 7 days on Unclaimed and Free, 90 days on Pro |
+| Idempotency key | 24 hours |
+| Scoped key `ttl` | 60 seconds to 31,536,000 seconds (1 year) |
+
+## Names
+
+| What | Rule |
+|---|---|
+| Snapshot name | 1 to 64 letters, digits, dots, dashes or underscores |
+| Idempotency key | 1 to 128 characters |

@@ -1,0 +1,65 @@
+---
+title: "agentfs and Turso's AgentFS"
+description: "How agentfs differs from Turso's AgentFS, and when to use which."
+---
+
+Both give an agent files, a key-value store and a log of tool calls. They are built differently, and each is the better pick for some jobs. This page says which.
+
+Turso's CLI is also called `agentfs`, and its `agentfs run` is not ours. Ours runs a command with files pulled in and pushed out.
+
+## Switch from Turso: change one import
+
+```diff
+- import { AgentFS } from "agentfs-sdk";
++ import { AgentFS } from "@agentfs/sdk";
+```
+
+`AgentFS.open({ id: "my-agent" })`, `agent.fs`, `agent.kv` and `agent.tools.record` keep working. Your agent's files, values and tool calls then live in the agentfs cloud. See [SDK](/reference/sdk) for what differs.
+
+## Side by side
+
+| | Turso's AgentFS | agentfs |
+|---|---|---|
+| Storage | One SQLite file per agent. Files are inodes plus 4 KB chunks in the `fs_data` table. | Bytes stored once by sha256 in object storage. |
+| Where it lives | On the machine. The cloud is an optional push and pull of the whole database to Turso Cloud. | In the cloud. Any machine reads and writes through the API, the CLI or MCP. |
+| Using the files | FUSE and NFS mounts. Full POSIX metadata. Works offline. | No mount. No POSIX metadata. Needs a network. |
+| Copy and undo | `agentfs run` gives a copy-on-write overlay on one machine. | Fork, snapshot, restore and diff in the cloud, from any machine. |
+| Two writers | Last write wins. A conflicting push fails until you pull. | A conditional write reports `conflict` and loses neither side. |
+| Key-value store | Yes. | Yes, with compare-and-swap and create-only. |
+| Tool-call log | Yes, the `tool_calls` table. | Yes, in the timeline next to file writes. |
+
+## Use Turso's AgentFS when
+
+- You want the agent to see a normal directory. It has FUSE and NFS mounts, and we have neither.
+- The agent works offline. Its database is a local file. Ours needs the network.
+- You need full POSIX metadata on files. We keep size, type, sha256, last modified, agent, session, commit and expiry.
+- One machine is enough, and a copy-on-write overlay there is all the undo you need.
+- You want each agent's state in one SQLite file.
+
+## Use agentfs when
+
+- You want a link for every file. Anyone can open it, and it answers byte ranges, so video seeks.
+- Files are large. The biggest file depends on your plan. See [Limits](/reference/limits).
+- Several machines or agents write to the same files. Bytes are stored once, and a conditional write (`If-Match`, `If-None-Match`) reports a conflict instead of losing one side.
+- You want to fork a folder, take a snapshot, restore it and diff it from any machine, without copying bytes.
+- A parent agent hands each sub-agent a scoped key for one folder, one set of permissions and one hour.
+- You want deleted files back within your plan's history, files that delete themselves after a ttl, and a way to watch writes as they happen.
+- You want a key-value store with compare-and-swap, where `--create-only` works as a lock across machines and agents.
+
+## Move between them
+
+```bash
+agentfs import ./agent.db --to imported/
+agentfs export imported/ ./agent.db
+```
+
+`import` reads a Turso AgentFS database (files, kv and tool calls) into agentfs. It needs Bun, or Node 22.5 and newer. `export` writes a database Turso's tools can open.
+
+## Benchmarks
+
+Numbers are coming.
+
+## Sources
+
+- Turso's AgentFS: [github.com/tursodatabase/agentfs](https://github.com/tursodatabase/agentfs), including its SPEC.md (v0.4).
+- Turso's docs: [docs.turso.tech/agentfs](https://docs.turso.tech/agentfs).
