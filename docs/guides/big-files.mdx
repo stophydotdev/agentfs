@@ -17,7 +17,7 @@ The biggest file depends on your plan, and it must fit your storage. A bigger fi
 
 ## Verified
 
-A file uploaded in one request has `verified: true`: agentfs hashed the bytes itself. A direct upload has `verified: false`, because agentfs does not see the bytes. Its sha256 is the one the client declared.
+A file uploaded in one request has `verified: true`: agentfs hashed the bytes itself. A file uploaded in parts, through agentfs or direct, has `verified: false`, because agentfs does not hash the parts. Its sha256 is the one the client declared. agentfs never links a new file to those bytes by sha256. Uploading the same bytes in parts to another path gets `upload_incomplete`, and a link by sha256 answers `missing`. Use `fork` or `mv` to copy or move a big file. Uploading the same bytes in one request makes them verified.
 
 ## Without the CLI
 
