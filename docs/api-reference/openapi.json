@@ -1951,7 +1951,7 @@
     },
     "/v1/uploads": {
       "post": {
-        "summary": "Start a multipart upload, straight to storage or through the API",
+        "summary": "Start an upload in parts, for a file above 90 MiB",
         "security": [
           {
             "bearer": []
@@ -2026,10 +2026,7 @@
                   "size": {
                     "type": "integer",
                     "exclusiveMinimum": 0,
-                    "maximum": 5000000000000
-                  },
-                  "direct": {
-                    "type": "boolean"
+                    "maximum": 9007199254740991
                   }
                 },
                 "required": [
@@ -2060,12 +2057,6 @@
                     },
                     "parts": {
                       "type": "number"
-                    },
-                    "partUrls": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
                     }
                   },
                   "required": [
@@ -2094,7 +2085,7 @@
     },
     "/v1/uploads/{upload}/{uploadId}/{part}": {
       "put": {
-        "summary": "Upload one part through the API",
+        "summary": "Upload one part: at most partBytes, with a Content-Length",
         "security": [
           {
             "bearer": []
@@ -2145,84 +2136,6 @@
                   "required": [
                     "partNumber",
                     "etag"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "An error, with a code that says what to do next.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/uploads/{upload}/{uploadId}/parts": {
-      "get": {
-        "summary": "Presigned URLs for the next parts of a direct upload",
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-access": "key",
-        "parameters": [
-          {
-            "name": "upload",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "uploadId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "from",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "default": 1,
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "from": {
-                      "type": "number"
-                    },
-                    "partUrls": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  },
-                  "required": [
-                    "from",
-                    "partUrls"
                   ],
                   "additionalProperties": false
                 }
@@ -2424,6 +2337,9 @@
                     "verified": {
                       "type": "boolean"
                     },
+                    "private": {
+                      "type": "boolean"
+                    },
                     "url": {
                       "type": [
                         "string",
@@ -2437,9 +2353,6 @@
                         "unchanged",
                         "restored"
                       ]
-                    },
-                    "private": {
-                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -4215,6 +4128,7 @@
                   "already_claimed",
                   "invalid_upload",
                   "upload_failed",
+                  "part_too_large",
                   "upload_incomplete",
                   "length_required",
                   "server_error",
@@ -4447,6 +4361,11 @@
       "code": "upload_failed",
       "status": 409,
       "message": "This upload failed or no longer exists. Start a new one with POST /v1/uploads."
+    },
+    {
+      "code": "part_too_large",
+      "status": 413,
+      "message": "A part is at most 90 MB. Cut the file into parts of the partBytes that POST /v1/uploads answered."
     },
     {
       "code": "upload_incomplete",

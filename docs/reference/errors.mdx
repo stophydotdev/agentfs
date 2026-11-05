@@ -56,6 +56,7 @@ The message says what to do next. The table lists every code the server can retu
 | `length_required` | 411 | Send a Content-Length header. For a stream of unknown length, use POST /v1/uploads. |
 | `precondition_failed` | 412 | The file changed since you read it. List it again, then retry with its current sha256 in If-Match. |
 | `file_too_large` | 413 | This file is bigger than your plan takes. See [Limits](/reference/limits) for the biggest file on each plan. |
+| `part_too_large` | 413 | A part is at most 90 MB. Cut the file into parts of the `partBytes` that `POST /v1/uploads` answered. See [Big files](/guides/big-files). |
 | `free_storage_full` | 413 | Your Free storage is full across your accounts. Delete files, or move to Pro. See [Limits](/reference/limits). |
 | `storage_cap_reached` | 413 | This account is full, or you set a lower cap with `PUT /v1/limits`. Delete files, claim the account, or move to Pro. See [Limits](/reference/limits). |
 | `storage_full` | 413 | Your Pro storage plus the spend cap you set is full. Delete files, or raise the cap on the billing page. |

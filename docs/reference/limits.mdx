@@ -12,7 +12,7 @@ Every account is on one plan. A new account is unclaimed. When a person claims i
 | | Unclaimed | Free | Pro |
 |---|---|---|---|
 | Storage | 1 GB | 2 GB, shared by all the accounts the person claimed | 500 GB, shared by all the accounts the person claimed |
-| Biggest file | 100 MB | 100 MB | 5 TB |
+| Biggest file | 100 MB | 100 MB | 800 GB |
 | Link downloads | 10 GB a month | 10 GB a month | Unlimited, under fair use |
 | New files | 50,000 a month | 50,000 a month | 1,000,000 a month, under fair use |
 | History | 7 days | 7 days | 90 days |
@@ -36,7 +36,8 @@ When a limit is reached, the server answers with an error that names it: `free_s
 | `tier` | `unclaimed` or `claimed`. |
 | `usedBytes`, `capBytes` | What this account uses, and its cap. |
 | `ownerUsedBytes`, `ownerLimitBytes` | What the person who claimed it uses across all their accounts, and their limit. |
-| `maxFileBytes` | The biggest file your plan takes. It does not decide whether a file goes up in one request or in parts. |
+| `maxFileBytes` | The biggest file you can upload: what your plan takes, and never more than parts can carry. It does not decide whether a file goes up in one request or in parts. |
+| `maxMultipartBytes`, `partBytes` | The biggest file you can send in parts, the same number as `maxFileBytes`, and the size of each part. |
 | `historyDays` | Days of history your plan keeps. |
 | `month` | This month's new files and link downloads, with their limits. `newFilesLimit` is the plan's count, and `linkBytesLimit` is `null` on Pro. |
 | `key` | The key you called with: `id`, `scoped`, `prefix`, `permissions` and `expiresAt`. |
@@ -47,10 +48,9 @@ A lower cap that you set with `agentfs limits --cap 5GB` returns `storage_cap_re
 
 | Limit | Value |
 |---|---|
-| Biggest file | `maxFileBytes`: 100 MB on Unclaimed and Free, 5 TB on Pro. A bigger file gets 413 `file_too_large`. |
+| Biggest file | `maxFileBytes`: 100 MB on Unclaimed and Free, 800 GB on Pro. A bigger file gets 413 `file_too_large`. |
 | One `PUT` | Up to 90 MB, on every plan |
-| Direct upload | Files above 90 MB, in parts of 525 MB. At or below 90 MB it is refused with `invalid_upload`. Presigned URLs last 6 hours. |
-| Upload in parts through the API | Parts of 90 MB, up to 10,000 parts, about 879 GB |
+| Upload in parts | Files above 90 MB, in parts of 90 MB, up to 10,000 parts. A part is one request of at most 90 MB with a `Content-Length`, because the API takes at most 100 MB in one request. A bigger part gets 413 `part_too_large`. |
 | Path | 900 characters |
 
 ## Requests

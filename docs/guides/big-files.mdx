@@ -1,9 +1,9 @@
 ---
 title: "Big files"
-description: "Upload big files straight to storage, and resume an interrupted upload."
+description: "Upload big files in parts, and resume an interrupted upload."
 ---
 
-`agentfs put` sends a big file for you. It splits the file into parts, sends them straight to storage in parallel, and resumes where it stopped if the upload is interrupted.
+`agentfs put` sends a big file for you. It splits the file into parts, sends them to the API in parallel, and resumes where it stopped if the upload is interrupted.
 
 ```bash
 agentfs put ./dataset.tar --to data
@@ -17,7 +17,7 @@ The biggest file depends on your plan, and it must fit your storage. A bigger fi
 
 ## Verified
 
-A file uploaded in one request has `verified: true`: agentfs hashed the bytes itself. A file of up to 1 GiB uploaded in parts, through agentfs or direct, is hashed when you complete it. It has `verified: true`, and a wrong sha256 gets 400 `sha256_mismatch`. A bigger file has `verified: false`, because agentfs does not hash it. Its sha256 is the one the client declared. agentfs never links a new file to those bytes by sha256: a link answers `missing`, and uploading them again gets 409 `unverified_bytes` before any part is sent. Use `fork` or `mv` to copy or move a big file, or `undelete` or `restore` to bring it back.
+A file uploaded in one request has `verified: true`: agentfs hashed the bytes itself. A file of up to 1 GiB uploaded in parts is hashed when you complete it. It has `verified: true`, and a wrong sha256 gets 400 `sha256_mismatch`. A bigger file has `verified: false`, because agentfs does not hash it. Its sha256 is the one the client declared. agentfs never links a new file to those bytes by sha256: a link answers `missing`, and uploading them again gets 409 `unverified_bytes` before any part is sent. Use `fork` or `mv` to copy or move a big file, or `undelete` or `restore` to bring it back.
 
 ## Without the CLI
 
@@ -25,27 +25,24 @@ A file above the one-request size goes up this way:
 
 <Steps>
   <Step title="Start">
-    `POST /v1/uploads` with `"direct": true`. The answer holds `upload`, `uploadId` and `parts`, plus `partBytes` and `partUrls`. The URLs are presigned `PUT` URLs that work for 6 hours.
+    `POST /v1/uploads` with `{ path, sha256, size }`. The answer holds `upload`, `uploadId`, `partBytes` (90 MB) and `parts`.
   </Step>
   <Step title="Send the parts">
-    Cut the file into parts of `partBytes` (about 525 MB today) and `PUT` each part to its URL with no key. Keep the `ETag` header that storage sends back. Send each ETag as returned, with or without quotes.
-  </Step>
-  <Step title="Get more URLs">
-    Above 1,000 parts, the start answer holds the first 1,000 URLs. Get the next ones with `GET /v1/uploads/{upload}/{uploadId}/parts?from=<partNumber>`. `from` is a 1-based part number, and each answer holds up to 1,000 URLs.
+    Cut the file into parts of `partBytes`. `PUT` each part to `/v1/uploads/{upload}/{uploadId}/{part}` with your key and a `Content-Length`. `{part}` is a 1-based part number. Every part but the last must be exactly `partBytes`. A part above `partBytes` gets 413 `part_too_large`. The answer is `{ partNumber, etag }`. Send parts in any order and in parallel. Send a part again to replace it.
   </Step>
   <Step title="Complete">
-    `POST /v1/uploads/{upload}/{uploadId}/complete` with `{ path, sha256, parts }`. The answer is the file. If the stored bytes do not add up to the `size` and `sha256` you started with, you get `upload_incomplete` and nothing is saved.
+    `POST /v1/uploads/{upload}/{uploadId}/complete` with `{ path, sha256, parts }`, the `partNumber` and `etag` of every part. The answer is the file. If the stored bytes do not add up to the `size` and `sha256` you started with, you get `upload_incomplete` and nothing is saved.
   </Step>
 </Steps>
 
 ```bash
 START=$(curl -s -X POST $AGENTFS/v1/uploads -H "authorization: Bearer $KEY" \
-  -d "{\"path\":\"huge.bin\",\"sha256\":\"$SHA\",\"size\":$SIZE,\"direct\":true}")
-echo $START | jq '{upload, uploadId, partBytes, urls: (.partUrls | length)}'
+  -d "{\"path\":\"huge.bin\",\"sha256\":\"$SHA\",\"size\":$SIZE}")
+echo $START | jq '{upload, uploadId, partBytes, parts}'
 ```
 
-Use a direct upload only for files above the one-request size. At or below it, `POST /v1/uploads` with `"direct": true` is refused with `invalid_upload`, so use `PUT /v1/files/{path}`.
+## Resume
 
-## The fallback route
+Keep the `upload`, `uploadId` and the parts you sent. After an interruption, send the parts that are left to the same `uploadId` and complete. `agentfs put` keeps this in `~/.config/agentfs/uploads` and resumes by itself. An upload nobody finishes is dropped after about a week. A part sent to a dropped upload gets 409 `upload_failed`: start a new upload.
 
-`POST /v1/uploads` without `direct` sends the parts through the API: `PUT` each part to `/v1/uploads/{upload}/{uploadId}/{part}` with your key. Every part but the last must be the same size and at least 5 MB. This route holds up to 10,000 parts, and that ceiling applies only here. See [Limits](/reference/limits).
+To stop an upload, `DELETE /v1/uploads/{upload}/{uploadId}`.
