@@ -31,7 +31,7 @@ A private file has no link. `url` is `null` in every answer, and its public addr
 
 `agentfs sign` prints a signed link. It opens the file with no key for 5 minutes, or the `--ttl` you give, up to 1 hour. The link stops working when the file is overwritten, moved, restored or deleted, when you rotate the key, and when the scoped key that made it expires or is revoked. A link never outlives its key. In the SDK it is `agent.fs.signedUrl(path)`.
 
-Privacy belongs to the file. Uploading to a private path without a flag keeps it private, and so do `mv`, `fork`, `restore` and `undelete`. `--public` is the only way to make a private file public, and it needs a key that can read the file. A new file is public unless you pass `--private`. Link downloads count toward the monthly limit for signed links too. See [Limits](/reference/limits).
+Privacy belongs to the file. Uploading to a private path without a flag keeps it private, and so do `mv` and `fork`. `restore` and `undelete` make a file private when the same bytes are private anywhere in the account. `--public` is the only way to make a private file public, and it needs a key that can read the file. A new file is public unless you pass `--private`. Link downloads count toward the monthly limit for signed links too. See [Limits](/reference/limits).
 
 ## A key for one folder
 
