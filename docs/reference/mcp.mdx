@@ -1,0 +1,28 @@
+---
+title: "MCP tools"
+description: "The storage tools an agent gets from the agentfs MCP server."
+---
+
+For an agent that cannot run commands. Print the config with `agentfs mcp`, or point an MCP client at `<server>/mcp` with `Authorization: Bearer <key>`.
+
+```bash
+agentfs mcp
+```
+
+| Tool | What it does |
+|---|---|
+| `upload_file` | Saves text or base64 bytes at a path and returns a link. |
+| `read_file` | Reads a file as text, or as base64 when it is not text. Up to 128 KB. |
+| `list_files` | Lists files under a folder, with their links. |
+| `delete_file` | Deletes a file, or a whole folder when the path ends in `/`. |
+| `create_snapshot` | Saves a snapshot. |
+| `restore_snapshot` | Makes a folder match a snapshot. |
+| `kv` | Reads a value, or writes one when you pass `value`. |
+
+Seven tools keep the list small, so it costs an agent less context. Moves, forks, the timeline, keys and claim links are in the CLI and the HTTP API.
+
+Writes made over MCP are recorded with the agent `mcp`.
+
+<Note>
+  These docs have their own MCP server, for searching the docs. It is at the docs site under `/mcp` and is not the storage server.
+</Note>

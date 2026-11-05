@@ -1,0 +1,41 @@
+---
+title: "Reliability and backups"
+description: "What agentfs keeps, for how long, and what protects you from losing a write."
+---
+
+## What we keep
+
+| What | For how long |
+|---|---|
+| A deleted file's bytes | 7 days. Bring a file back with `agentfs undelete <path>`. |
+| A snapshot | Until you delete it. |
+| The bytes a snapshot holds | As long as the snapshot exists, even if you delete the file. They count toward your usage. |
+| A response to a write with an `Idempotency-Key` | 24 hours. |
+| Files of an unclaimed account | 24 hours after its first upload. |
+
+## Two writers, no lost write
+
+Send `If-Match` or `If-None-Match` with a write and the server writes only if the file is as you expect. Otherwise you get 412 `precondition_failed` and nothing changes.
+
+`DELETE /v1/files/{path}` takes `If-Match` too, so you delete only the version you read. `agentfs put` does this for you. It reads the listing first, and a file that changed remotely since then is reported as `conflict` and the exit code is 3. Add `--force` to overwrite it.
+
+`agentfs sync` keeps both versions when both sides changed. See [Sync and watch](/guides/sync).
+
+## Retry without writing twice
+
+Every POST, PUT and DELETE takes an `Idempotency-Key` of 1 to 128 characters. Send the same key with the same request within 24 hours and you get the first response again, with the header `idempotent-replay: true`. Nothing is written twice.
+
+- The same key with a different request returns 422 `idempotency_key_reused`.
+- The same key while the first request still runs returns 409 `idempotency_in_progress`, with `retryAfter` set to 1.
+
+The CLI and the SDK add a fresh key to every write and retry once on `idempotency_in_progress`.
+
+## Find a request
+
+Every response has an `x-request-id` header, and every error body has a `requestId`. Quote it when you send feedback with `agentfs feedback`.
+
+## Undo a mistake
+
+- A deleted file: `agentfs undelete <path>`, within 7 days.
+- A folder changed by a bad step: `agentfs restore <snapshot>`.
+- A write that raced another: the 412 or `conflict` told you, and nothing was lost.
