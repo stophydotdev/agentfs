@@ -4219,7 +4219,8 @@
                   "length_required",
                   "server_error",
                   "invalid_private",
-                  "invalid_sign"
+                  "invalid_sign",
+                  "unverified_bytes"
                 ]
               },
               "message": {
@@ -4471,6 +4472,11 @@
       "code": "invalid_sign",
       "status": 400,
       "message": "Send JSON { path, ttlSeconds }: the file's path and optionally 1 to 3600 seconds, 300 by default."
+    },
+    {
+      "code": "unverified_bytes",
+      "status": 409,
+      "message": "This account holds these bytes from an upload in parts that was too big to verify, so a new file cannot reuse them. Copy the file with fork or mv, or bring it back with undelete or restore, instead of uploading it again."
     }
   ]
 }
