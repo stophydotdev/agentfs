@@ -4256,7 +4256,7 @@
     {
       "code": "unauthorized",
       "status": 401,
-      "message": "Send your key as `Authorization: Bearer <key>`. Get a key from POST /v1/signup."
+      "message": "Send a valid key as `Authorization: Bearer <key>`. Your keys are in the dashboard at https://agentfs.cloud."
     },
     {
       "code": "invalid_path",
@@ -4476,7 +4476,7 @@
     {
       "code": "unverified_bytes",
       "status": 409,
-      "message": "This account holds these bytes from an upload in parts that was too big to verify, so a new file cannot reuse them. Copy the file with fork or mv, or bring it back with undelete or restore, instead of uploading it again."
+      "message": "These bytes are already in this account but too big to check, so they can't be uploaded again. Copy the existing file with agentfs mv, or bring it back with agentfs undelete."
     }
   ]
 }

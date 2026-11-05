@@ -40,7 +40,7 @@ The message says what to do next. The table lists every code the server can retu
 | `key_expired` | 401 | This key expired. Ask for a new one. |
 | `key_revoked` | 401 | This key was rotated, or its unclaimed account expired. Use your newest key, or sign up again. |
 | `sign_in_required` | 401 | This route uses a signed-in session, not an agent key. Sign in first. |
-| `unauthorized` | 401 | Send your key as `Authorization: Bearer <key>`. Get a key from POST /v1/signup. |
+| `unauthorized` | 401 | Send a valid key as `Authorization: Bearer <key>`. Your keys are in the dashboard at https://agentfs.cloud. |
 | `key_scope` | 403 | This key can't do that here. Ask for a key with the folder and permission you need. |
 | `billing_customer_not_found` | 404 | Billing routes only: there is no billing account yet. Start one with a checkout. |
 | `not_found` | 404 | Nothing is here. |
@@ -51,7 +51,7 @@ The message says what to do next. The table lists every code the server can retu
 | `idempotency_in_progress` | 409 | A request with this Idempotency-Key is still running. Retry after retryAfter seconds. |
 | `snapshot_exists` | 409 | A snapshot with this name exists. Pick another name, or delete it first. |
 | `subscription_exists` | 409 | Billing routes only: you already have a subscription. Change it from the billing portal. |
-| `unverified_bytes` | 409 | This account holds these bytes from an upload in parts that was too big to verify, so a new file cannot reuse them. Copy the file with fork or mv, or bring it back with undelete or restore, instead of uploading it again. |
+| `unverified_bytes` | 409 | These bytes are already in this account but too big to check, so they can't be uploaded again. Copy the existing file with agentfs mv, or bring it back with agentfs undelete. |
 | `upload_failed` | 409 | This upload failed or no longer exists. Start a new one with POST /v1/uploads. |
 | `length_required` | 411 | Send a Content-Length header. For a stream of unknown length, use POST /v1/uploads. |
 | `precondition_failed` | 412 | The file changed since you read it. List it again, then retry with its current sha256 in If-Match. |

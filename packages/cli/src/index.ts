@@ -95,7 +95,7 @@ const usageFor = (command: string) => {
 /** Commands the 0.0.2 CLI and the old skill used, with the line that names what to run now. */
 const RENAMED = new Map([
   ["upload", "agentfs upload is now agentfs put. Run: agentfs put <file or folder>... [--to folder]"],
-  ["share", "agentfs share is gone: every file from agentfs put has a public link. Run: agentfs put <file>"],
+  ["share", "agentfs share is now agentfs sign. Run: agentfs sign <path> [--ttl 5m]"],
   ["init", "agentfs init is gone: any command signs you up. To use a key you have, run: agentfs login --key-stdin"],
 ]);
 

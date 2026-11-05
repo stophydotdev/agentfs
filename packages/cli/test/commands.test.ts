@@ -842,7 +842,7 @@ test("the key goes only over HTTPS, or HTTP to localhost and 127.x", async () =>
 test("the command names from 0.0.2 print one line naming the new command, and sign nobody up", async () => {
   const lines = {
     upload: "agentfs upload is now agentfs put. Run: agentfs put <file or folder>... [--to folder]",
-    share: "agentfs share is gone: every file from agentfs put has a public link. Run: agentfs put <file>",
+    share: "agentfs share is now agentfs sign. Run: agentfs sign <path> [--ttl 5m]",
     init: "agentfs init is gone: any command signs you up. To use a key you have, run: agentfs login --key-stdin",
   };
   const run = await freshConfig();
