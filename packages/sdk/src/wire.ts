@@ -14,7 +14,7 @@ export type FileInfo = {
 };
 export type SignedLink = { url: string; expiresAt: string };
 export type Listing = { files: FileInfo[]; folders: string[]; cursor: string | null };
-export type Started = { upload: string; uploadId: string; partBytes: number; partUrls: string[] };
+export type Started = { upload: string; uploadId: string; partBytes: number };
 export type Snapshot = { name: string; prefix: string; files: number; bytes: number; createdAt: string };
 export type Restored = { name: string; to: string; restored: number; deleted: number };
 export type Diff = {
@@ -145,20 +145,12 @@ export const readStarted = (value: unknown): Started => {
     upload: text(started, "upload"),
     uploadId: text(started, "uploadId"),
     partBytes: count(started, "partBytes"),
-    partUrls: list(started, "partUrls", (url) =>
-      typeof url === "string" ? url : malformed("partUrls"),
-    ),
   };
 };
 
-export const readPartUrls = (value: unknown) => {
-  const page = fields(value, "part urls");
-  return {
-    from: count(page, "from"),
-    partUrls: list(page, "partUrls", (url) =>
-      typeof url === "string" ? url : malformed("partUrls"),
-    ),
-  };
+export const readPart = (value: unknown) => {
+  const part = fields(value, "part");
+  return { partNumber: count(part, "partNumber"), etag: text(part, "etag") };
 };
 
 export const readSnapshot = (value: unknown): Snapshot => {

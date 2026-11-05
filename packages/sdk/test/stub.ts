@@ -16,7 +16,6 @@ type Event = {
 export type StubOptions = {
   maxFileBytes?: number;
   partBytes?: number;
-  urlsPerBatch?: number;
   pageSize?: number;
 };
 
@@ -26,14 +25,13 @@ const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("he
 export const startStub = (options: StubOptions = {}) => {
   const maxFileBytes = options.maxFileBytes ?? 90 * 1024 * 1024;
   const partBytes = options.partBytes ?? 1024 * 1024;
-  const urlsPerBatch = options.urlsPerBatch ?? 1000;
   const pageSize = options.pageSize ?? 1000;
   const files = new Map<string, Stored>();
   const kv = new Map<string, { value: unknown; version: number; updatedAt: string }>();
   const events: Event[] = [];
   const snapshots = new Map<string, { prefix: string; files: Map<string, Stored> }>();
   const uploads = new Map<string, Upload>();
-  const seen = { userAgents: new Set<string>(), writeAgents: [] as (string | null)[], readAgents: [] as (string | null)[], signups: 0, partFetches: 0, authorizations: new Set<string>(), aborted: 0, requests: [] as string[], signs: [] as { path: string; ttlSeconds: number | undefined }[] };
+  const seen = { userAgents: new Set<string>(), writeAgents: [] as (string | null)[], readAgents: [] as (string | null)[], signups: 0, partPuts: [] as number[], authorizations: new Set<string>(), aborted: 0, requests: [] as string[], signs: [] as { path: string; ttlSeconds: number | undefined }[] };
   let requestCounter = 0;
   let nextEvent = 1;
 
@@ -88,14 +86,6 @@ export const startStub = (options: StubOptions = {}) => {
         if (range === null) return new Response(stored.bytes);
         const [, from = "0", to = "0"] = range;
         return new Response(stored.bytes.slice(Number(from), Number(to) + 1), { status: 206 });
-      }
-
-      const storage = /^\/storage\/([^/]+)\/(\d+)$/u.exec(url.pathname);
-      if (storage !== null && request.method === "PUT") {
-        const upload = uploads.get(storage[1] ?? "");
-        if (upload === undefined) return problem("upload_failed", "No such upload.", 409);
-        upload.parts.set(Number(storage[2]), new Uint8Array(await request.arrayBuffer()));
-        return new Response(null, { headers: { etag: `"part-${storage[2]}"` } });
       }
 
       const authorization = request.headers.get("authorization");
@@ -224,22 +214,20 @@ export const startStub = (options: StubOptions = {}) => {
       }
 
       if (request.method === "POST" && url.pathname === "/v1/uploads") {
-        const body: { path: string; size: number; direct: boolean } = await request.json();
+        const body: { path: string; size: number } = await request.json();
         const token = crypto.randomUUID();
         uploads.set(token, { path: body.path, size: body.size, parts: new Map() });
         const count = Math.ceil(body.size / partBytes);
-        const partUrls = Array.from({ length: Math.min(count, urlsPerBatch) }, (_, index) => `${origin}/storage/${token}/${index + 1}`);
-        return reply({ upload: token, uploadId: "multipart-1", partBytes, parts: count, partUrls }, 201);
+        return reply({ upload: token, uploadId: "multipart-1", partBytes, parts: count }, 201);
       }
-      const parts = /^\/v1\/uploads\/([^/]+)\/([^/]+)\/(parts|complete)$/u.exec(url.pathname);
-      if (parts !== null && request.method === "GET" && parts[3] === "parts") {
-        seen.partFetches += 1;
+      const parts = /^\/v1\/uploads\/([^/]+)\/([^/]+)\/(\d+|complete)$/u.exec(url.pathname);
+      if (parts !== null && request.method === "PUT") {
         const upload = uploads.get(parts[1] ?? "");
         if (upload === undefined) return problem("upload_failed", "No such upload.", 409);
-        const from = Number(url.searchParams.get("from"));
-        const count = Math.ceil(upload.size / partBytes);
-        const numbers = Array.from({ length: count }, (_, index) => index + 1).filter((number) => number >= from).slice(0, urlsPerBatch);
-        return reply({ from, partUrls: numbers.map((number) => `${origin}/storage/${parts[1]}/${number}`) });
+        const partNumber = Number(parts[3]);
+        upload.parts.set(partNumber, new Uint8Array(await request.arrayBuffer()));
+        seen.partPuts.push(partNumber);
+        return reply({ partNumber, etag: `"part-${partNumber}"` });
       }
       if (parts !== null && request.method === "POST" && parts[3] === "complete") {
         const upload = uploads.get(parts[1] ?? "");

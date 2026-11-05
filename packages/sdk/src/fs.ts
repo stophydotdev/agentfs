@@ -11,7 +11,7 @@ import {
 } from "./stats.js";
 import type { FileInfo } from "./wire.js";
 
-/** A write above this many bytes goes up in parts. The server refuses a direct upload at or below it, and it is the same on every plan. */
+/** A write above this many bytes goes up in parts, the same on every plan. One request carries at most this much. */
 const PARTS_ABOVE_BYTES = 90 * 1024 * 1024;
 
 type Encoding = BufferEncoding | { encoding?: BufferEncoding };
@@ -134,9 +134,8 @@ export class Filesystem {
       const body = typeof data === "string" ? encode(data, encodingOf(options) ?? "utf8") : owned(data);
       const sha256 = await sha256Hex(body);
       const target = this.remote(path);
-      const direct = body.byteLength > PARTS_ABOVE_BYTES;
       const visibility = { private: privateOf(options) };
-      if (direct) await this.client.uploadDirect(target, body, sha256, visibility);
+      if (body.byteLength > PARTS_ABOVE_BYTES) await this.client.uploadParts(target, body, sha256, visibility);
       else await this.client.put(target, body, sha256, visibility);
     });
   }

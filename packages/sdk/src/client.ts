@@ -15,7 +15,7 @@ import {
   readLinkStatus,
   readLimits,
   readListing,
-  readPartUrls,
+  readPart,
   readProblem,
   readRestored,
   readSignedLink,
@@ -206,32 +206,12 @@ export class Client {
     return readSignedLink(await this.read("/v1/files/sign", json("POST", { path, ttlSeconds })));
   }
 
-  async uploadDirect(path: string, body: Bytes, sha256: string, options: Visibility = {}) {
+  async uploadParts(path: string, body: Bytes, sha256: string, options: Visibility = {}) {
     const started = readStarted(
-      await this.read("/v1/uploads", json("POST", { path, sha256, size: body.byteLength, direct: true })),
+      await this.read("/v1/uploads", json("POST", { path, sha256, size: body.byteLength })),
     );
     const base = `/v1/uploads/${started.upload}/${encodeURIComponent(started.uploadId)}`;
     const partCount = Math.ceil(body.byteLength / started.partBytes);
-    const urls = new Map(started.partUrls.map((url, index) => [index + 1, url]));
-    let refill: Promise<void> | null = null;
-    const fetchUrls = async (from: number) => {
-      const page = readPartUrls(
-        await this.read(`${base}/parts?${new URLSearchParams({ from: String(from) })}`),
-      );
-      page.partUrls.forEach((url, index) => urls.set(page.from + index, url));
-    };
-    const urlFor = async (number: number) => {
-      for (let tries = 0; !urls.has(number); tries += 1) {
-        if (tries > partCount) {
-          throw new AgentFSError({ code: "bad_response", message: `bad_response: no URL for part ${number}.` });
-        }
-        refill ??= fetchUrls(number).finally(() => {
-          refill = null;
-        });
-        await refill;
-      }
-      return urls.get(number) ?? "";
-    };
     const parts: { partNumber: number; etag: string }[] = [];
     let next = 1;
     const worker = async () => {
@@ -240,12 +220,7 @@ export class Client {
         next += 1;
         const start = (number - 1) * started.partBytes;
         const slice = body.subarray(start, Math.min(start + started.partBytes, body.byteLength));
-        const response = await attempt(await urlFor(number), { method: "PUT", body: slice });
-        const etag = response.headers.get("etag");
-        if (etag === null) {
-          throw new AgentFSError({ code: "bad_response", message: "bad_response: storage sent no ETag." });
-        }
-        parts.push({ partNumber: number, etag });
+        parts.push(readPart(await this.read(`${base}/${number}`, { method: "PUT", body: slice })));
       }
     };
     try {
