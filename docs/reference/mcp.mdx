@@ -79,6 +79,7 @@ Use your own server's address in place of `https://agentfs.cloud` if `agentfs mc
 | Tool | What it does |
 |---|---|
 | `upload_file` | Saves text or base64 bytes at a path and returns a link. Pass `private` for a file with no link. |
+| `sign_link` | Makes a link that opens a file, private or not, for a few minutes with no key. Needs read on the file. |
 | `read_file` | Reads a file as text, or as base64 when it is not text. Up to 128 KB. |
 | `list_files` | Lists files under a folder, with their links. |
 | `delete_file` | Deletes a file, or a whole folder when the path ends in `/`. |
