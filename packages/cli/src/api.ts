@@ -367,7 +367,12 @@ export const connect = async (given?: { key: string; source: KeySource }) => {
     `/v1/uploads/${upload}/${encodeURIComponent(uploadId)}`;
   const eventsPage = async (params: Record<string, string>) =>
     history.parse(
-      await (await send(`/v1/events?${new URLSearchParams(params)}`, { headers })).json(),
+      await (
+        await send(
+          `/v1/events?${new URLSearchParams(Object.entries(params).filter(([name, value]) => value !== "" || name === "cursor"))}`,
+          { headers },
+        )
+      ).json(),
     );
   const browse = async (prefix: string, delimiter = "", search = "") => {
     const files: RemoteFile[] = [];

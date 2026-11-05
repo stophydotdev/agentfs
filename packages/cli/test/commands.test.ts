@@ -271,6 +271,14 @@ test("timeline follows the cursor and prints events newest first", async () => {
   expect(seen[0]?.query.get("session")).toBe("s1");
 });
 
+test("timeline with no filter sends no empty filter, which the server would match against nothing", async () => {
+  script.set("GET /v1/events", () => Response.json({ events: [event("1", "put", "a.txt", null)], cursor: null }));
+  const result = await agentfs("timeline");
+  expect(result.stdout).toBe("2026-10-29T00:00:01.000Z\tput\ta.txt\tcodex\t-\t-\n");
+  const query = seen.find((request) => request.path === "/v1/events")?.query;
+  expect(query?.toString()).toBe("cursor=");
+});
+
 test("a scoped key is made with the folder, permissions and lifetime asked for", async () => {
   const made = {
     id: "key_1",
