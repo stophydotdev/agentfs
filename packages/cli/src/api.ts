@@ -232,7 +232,8 @@ export const configDir = join(
   "agentfs",
 );
 export const keyFile = join(configDir, "key");
-const legacyCredentials = join(configDir, "credentials.json");
+export const legacyCredentials = join(configDir, "credentials.json");
+export const hasLegacyLogin = () => access(legacyCredentials).then(() => true, () => false);
 
 let command: string | undefined;
 
@@ -321,7 +322,7 @@ export const findKey = async (): Promise<{ key: string; source: KeySource } | nu
 const loadKey = async (given?: { key: string; source: KeySource }) => {
   const found = given ?? (await findKey());
   if (found !== null) return found;
-  if (await access(legacyCredentials).then(() => true, () => false)) {
+  if (await hasLegacyLogin()) {
     throw new UsageError(
       `found a 0.0.2 login in ${legacyCredentials}, which this version does not read, and no key. Signing up now would start a new empty account. Get a key for that account from the API keys page of the dashboard on https://agentfs.cloud, then run: agentfs login --key-stdin`,
     );
@@ -405,6 +406,9 @@ export const connect = async (given?: { key: string; source: KeySource }) => {
       const response = await send(`/v1/files/${segments(path)}`, { method: "HEAD", headers }).catch(
         (error: Error) => {
           if (error instanceof ApiError && error.code === "404") return null;
+          if (error instanceof ApiError && error.code === "400") {
+            return send(`/v1/files/${segments(path)}`, { headers }).then(() => Promise.reject(error));
+          }
           throw error;
         },
       );

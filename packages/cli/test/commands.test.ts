@@ -180,6 +180,19 @@ test("stat of a missing file fails with not_found", async () => {
   expect(result.code).toBe(1);
 });
 
+test("stat of a bad path shows the server's error, not a blank 400", async () => {
+  script.set("HEAD /v1/files/a/b.txt", () => new Response(null, { status: 400 }));
+  script.set("GET /v1/files/a/b.txt", () =>
+    Response.json(
+      { error: { code: "invalid_path", message: "Bad path.", retryAfter: null, requestId: "req_p" } },
+      { status: 400 },
+    ),
+  );
+  const result = await agentfs("stat", "a/b.txt");
+  expect(result.stderr).toBe("error: invalid_path: Bad path. (request req_p)\n");
+  expect(result.code).toBe(1);
+});
+
 test("mv moves a file as it is and adds the slashes for a folder that exists", async () => {
   script.set("HEAD /v1/files/a.txt", () => new Response(null, { headers: HEAD }));
   script.set("POST /v1/files/move", () => Response.json({ from: "x", to: "y", moved: 1 }));
@@ -791,6 +804,16 @@ const withEnv = (env: Record<string, string>, cwd: string, ...args: string[]) =>
     ([stdout, stderr, code]) => ({ stdout, stderr, code }),
   );
 };
+
+test("status with only a 0.0.2 login says to make a key, not that a command signs up", async () => {
+  const home = await mkdtemp(join(tmpdir(), "agentfs-legacy-"));
+  await mkdir(join(home, "agentfs"));
+  await writeFile(join(home, "agentfs", "credentials.json"), "{}");
+  const result = await withEnv({ XDG_CONFIG_HOME: home, AGENTFS_URL: server.url.href }, home, "status", "--no-json");
+  expect(result.stdout).toContain("found a 0.0.2 login");
+  expect(result.stdout).toContain("agentfs login --key-stdin");
+  expect(result.stdout).not.toContain("any command signs up");
+});
 
 test("a 0.0.2 login with no key stops instead of signing up a new account", async () => {
   const home = await mkdtemp(join(tmpdir(), "agentfs-legacy-"));
