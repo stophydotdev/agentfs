@@ -1,6 +1,6 @@
 {
   "name": "@agentfs/sdk",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Cloud storage for AI agents. A drop-in for Turso's agentfs-sdk, backed by agentfs.",
   "license": "MIT",
   "homepage": "https://agentfs.cloud",
