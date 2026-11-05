@@ -18,15 +18,15 @@ const saved = z.object({
 
 type Progress = z.infer<typeof saved>;
 
-const stateFile = (api: Api, sha256: string) =>
-  join(configDir, "uploads", `${api.account}-${sha256}.json`);
+const stateFile = async (api: Api, sha256: string) =>
+  join(configDir, "uploads", `${await api.account()}-${sha256}.json`);
 
 const resumed = async (api: Api, sha256: string) =>
-  saved.safeParse(JSON.parse(await readFile(stateFile(api, sha256), "utf8").catch(() => "null"))).data;
+  saved.safeParse(JSON.parse(await readFile(await stateFile(api, sha256), "utf8").catch(() => "null"))).data;
 
 const remember = async (api: Api, sha256: string, progress: Progress) => {
   await mkdir(join(configDir, "uploads"), { recursive: true });
-  await writeFile(stateFile(api, sha256), JSON.stringify(progress));
+  await writeFile(await stateFile(api, sha256), JSON.stringify(progress));
 };
 
 const withRetries = async <Result>(work: () => Promise<Result>, attempt = 1): Promise<Result> =>
@@ -98,9 +98,9 @@ const sendParts = async (api: Api, local: Wanted & { file: string }, write: File
 export const uploadInParts = async (api: Api, local: Wanted & { file: string }, write: FileWrite) => {
   const file = await sendParts(api, local, write).catch(async (error: Error) => {
     if (!(error instanceof ApiError && error.code === "upload_failed")) throw error;
-    await rm(stateFile(api, local.sha256), { force: true });
+    await rm(await stateFile(api, local.sha256), { force: true });
     return sendParts(api, local, write);
   });
-  await rm(stateFile(api, local.sha256), { force: true });
+  await rm(await stateFile(api, local.sha256), { force: true });
   return file;
 };

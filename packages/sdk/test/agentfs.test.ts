@@ -11,7 +11,7 @@ const MB = 1024 * 1024;
 const stub = startStub({ maxFileBytes: 5 * 1024 * 1024 * MB, partBytes: 32 * MB, urlsPerBatch: 2, pageSize: 2 });
 afterAll(() => stub.stop());
 
-const KEY = `afs_${stub.account}.0.${"b".repeat(64)}`;
+const KEY = `afs_${"b".repeat(32)}`;
 const open = (prefix?: string) => AgentFS.open({ key: KEY, url: stub.url, prefix });
 
 beforeEach(() => {
@@ -326,7 +326,7 @@ describe("opening", () => {
       expect(await readFile(file, "utf8")).toBe(signed.key);
       expect((await AgentFS.open()).key).toBe(signed.key);
       expect(stub.seen.signups).toBe(1);
-      process.env.AGENTFS_KEY = `afs_${stub.account}.0.${"c".repeat(64)}`;
+      process.env.AGENTFS_KEY = `afs_${"c".repeat(32)}`;
       expect((await AgentFS.open()).key).toBe(process.env.AGENTFS_KEY);
       expect((await AgentFS.open({ key: KEY })).key).toBe(KEY);
       expect((await AgentFS.open({ key: KEY })).url).toBe(stub.url);

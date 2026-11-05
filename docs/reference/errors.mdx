@@ -38,6 +38,7 @@ The message says what to do next. The table lists every code the server can retu
 | `sha256_mismatch` | 400 | The bytes received do not match x-sha256. Hash the file again and retry. |
 | `upload_incomplete` | 400 | The stored bytes do not match the size or sha256 this upload started with. Upload it again. |
 | `key_expired` | 401 | This key expired. Ask for a new one. |
+| `key_format_changed` | 401 | AgentFS keys changed format and this key no longer works. Make a new key in the dashboard at https://agentfs.cloud, then run agentfs login --key-stdin. |
 | `key_revoked` | 401 | This key was rotated, or its unclaimed account expired. Use your newest key, or sign up again. |
 | `sign_in_required` | 401 | This route uses a signed-in session, not an agent key. Sign in first. |
 | `unauthorized` | 401 | Send a valid key as `Authorization: Bearer <key>`. Your keys are in the dashboard at https://agentfs.cloud. |

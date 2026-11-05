@@ -110,6 +110,7 @@ const linked = z.object({
 const uploaded = remoteFile.extend({ status: z.enum(["uploaded", "unchanged"]) });
 const restoredFile = remoteFile.extend({ status: z.literal("restored") });
 const limits = z.object({
+  account: z.string(),
   key: z.object({
     id: z.string().nullable(),
     scoped: z.boolean(),
@@ -392,10 +393,12 @@ export const connect = async (given?: { key: string; source: KeySource }) => {
     } while (cursor !== "");
     return { files, folders };
   };
+  const readLimits = async () => limits.parse(await (await send("/v1/limits", { headers })).json());
+  let account: Promise<string> | undefined;
   return {
     key,
     source,
-    account: key.slice("afs_".length).split(".")[0] ?? "",
+    account: () => (account ??= readLimits().then((found) => found.account)),
     browse,
     list: async (prefix: string, search = "") => (await browse(prefix, "", search)).files,
     stat: async (path: string): Promise<RemoteFile | null> => {
@@ -584,7 +587,7 @@ export const connect = async (given?: { key: string; source: KeySource }) => {
       (await eventsPage({ ...filter, cursor: "" })).events[0]?.id ?? "0",
     fork: async (from: string, to: string) =>
       forked.parse(await (await post("/v1/fork", JSON.stringify({ from, to }))).json()),
-    limits: async () => limits.parse(await (await send("/v1/limits", { headers })).json()),
+    limits: readLimits,
     setCap: async (capBytes: number) =>
       limits.parse(await (await send("/v1/limits", withJson("PUT", JSON.stringify({ capBytes })))).json()),
     feedback: async (message: string) => {

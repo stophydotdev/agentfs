@@ -80,7 +80,7 @@ const storageUrls = (request: Request, from: number) =>
 const server = Bun.serve({
   port: 0,
   routes: {
-    "/v1/signup": { POST: () => Response.json({ key: "afs_test" }, { status: 201 }) },
+    "/v1/signup": { POST: () => Response.json({ key: "afs_TestTestTestTestTestTestTestTest" }, { status: 201 }) },
     "/v1/files": {
       GET: (request) => {
         const prefix = new URL(request.url).searchParams.get("prefix") ?? "";
@@ -131,6 +131,7 @@ const server = Bun.serve({
     },
     "/v1/limits": () =>
       Response.json({
+        account: "acct",
         key: { id: "key_1", scoped: false, prefix: "", permissions: ["read", "write", "delete"], expiresAt: null },
         plan: plan.name,
         tier: "unclaimed",
@@ -355,7 +356,7 @@ test("a resume state for an upload the server no longer has starts a new upload"
   const sha256 = sha256Of(body);
   const state = { upload: crypto.randomUUID(), uploadId: "stale", partBytes: PART_BYTES, direct: true, done: [] };
   await mkdir(join(config, "agentfs", "uploads"), { recursive: true });
-  await writeFile(join(config, "agentfs", "uploads", `test-${sha256}.json`), JSON.stringify(state));
+  await writeFile(join(config, "agentfs", "uploads", `acct-${sha256}.json`), JSON.stringify(state));
 
   const result = await agentfs("put", folder);
   expect(result.stderr).toContain("1 uploaded");
@@ -484,7 +485,7 @@ test("a resume fetches fresh URLs and sends only the parts that are left", async
     ],
   };
   await mkdir(join(config, "agentfs", "uploads"), { recursive: true });
-  await writeFile(join(config, "agentfs", "uploads", `test-${sha256}.json`), JSON.stringify(state));
+  await writeFile(join(config, "agentfs", "uploads", `acct-${sha256}.json`), JSON.stringify(state));
 
   const result = await agentfs("put", folder);
   expect(result.stderr).toContain("1 uploaded");

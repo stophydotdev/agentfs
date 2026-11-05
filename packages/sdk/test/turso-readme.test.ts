@@ -4,7 +4,7 @@ import { startStub } from "./stub";
 
 const stub = startStub();
 afterAll(() => stub.stop());
-process.env.AGENTFS_KEY = `afs_${stub.account}.0.${"d".repeat(64)}`;
+process.env.AGENTFS_KEY = `afs_${"d".repeat(32)}`;
 process.env.AGENTFS_URL = stub.url;
 
 test("Turso's README quick-start runs with only the import line changed", async () => {
