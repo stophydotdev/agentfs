@@ -17,7 +17,7 @@ description: "Every word the docs use, defined once."
 | link | The public address of a file: `https://agentfs.cloud/<account>/<path>`. A link is public: anyone who has it can open the file, and no key is needed. A private file has no link. Uploading to the same path again keeps the link. It stops working after a delete, a move or rename, when the file expires, or when the download limit is reached. See [Keys and sharing](/guides/keys-and-sharing). |
 | private | A file with no link. A key reads it, or a signed link does for a few minutes. See [Keys and sharing](/guides/keys-and-sharing). |
 | upload | A big file sent in parts. You start it, send each part, then complete it. A direct upload sends each part straight to storage. It is for big files, and the file must fit your plan. See [Limits](/reference/limits). `agentfs put` does this for you. |
-| verified | A field on a file, and the `x-agentfs-verified` header. True when agentfs hashed the bytes itself. False for an upload in parts, where the sha256 is the one the client declared. |
+| verified | A field on a file, and the `x-agentfs-verified` header. True when agentfs hashed the bytes itself. False for an upload in parts of more than 1 GiB, where the sha256 is the one the client declared. |
 | fork | A copy of a folder at a new folder. It points at the same bytes, so it is instant and uses no storage. |
 | snapshot | A name for what a folder held at one moment: each path and its sha256. No bytes are copied, and the bytes it holds count toward your usage. |
 | restore | Make a folder hold exactly the files of a snapshot. Files that are not in the snapshot are deleted. |

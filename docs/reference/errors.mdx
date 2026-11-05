@@ -51,6 +51,7 @@ The message says what to do next. The table lists every code the server can retu
 | `idempotency_in_progress` | 409 | A request with this Idempotency-Key is still running. Retry after retryAfter seconds. |
 | `snapshot_exists` | 409 | A snapshot with this name exists. Pick another name, or delete it first. |
 | `subscription_exists` | 409 | Billing routes only: you already have a subscription. Change it from the billing portal. |
+| `unverified_bytes` | 409 | This account holds these bytes from an upload in parts that was too big to verify, so a new file cannot reuse them. Copy the file with fork or mv, or bring it back with undelete or restore, instead of uploading it again. |
 | `upload_failed` | 409 | This upload failed or no longer exists. Start a new one with POST /v1/uploads. |
 | `length_required` | 411 | Send a Content-Length header. For a stream of unknown length, use POST /v1/uploads. |
 | `precondition_failed` | 412 | The file changed since you read it. List it again, then retry with its current sha256 in If-Match. |
