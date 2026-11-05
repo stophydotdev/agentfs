@@ -8,7 +8,7 @@ description: "Give a sub-agent a key for one folder, share a link, and hand the 
 Every file has a link: `https://agentfs.cloud/<account>/<path>`. Links answer `Range` requests, so video seeks. Uploading to the same path keeps the link.
 
 <Warning>
-  Every link is public. It works for anyone who has it, with no key and no sign-in. There are no private links. Never upload secrets or private data. `agentfs put` skips what `.gitignore` ignores and files that look like secrets (`.env`, `*.pem`, `*.key`, SSH keys). Add `--include-secrets` only when you mean it.
+  A link is public. It works for anyone who has it, with no key and no sign-in. To keep a file off the web, upload it as [private](#keep-a-file-private). Never upload secrets with a public link. `agentfs put` skips what `.gitignore` ignores and files that look like secrets (`.env`, `*.pem`, `*.key`, SSH keys). Add `--include-secrets` only when you mean it.
 </Warning>
 
 A link stops working when:
@@ -19,6 +19,19 @@ A link stops working when:
 - the owner's link downloads for the month are used up, on the Free and unclaimed plans. Links work again on the 1st (UTC). See [Limits](/reference/limits).
 
 Use the `url` the CLI or API gives you. Links may be served from a different host than the API.
+
+## Keep a file private
+
+```bash
+agentfs put page.html --to cache --private
+agentfs sign cache/page.html --ttl 5m
+```
+
+A private file has no link. `url` is `null` in every answer, and its public address answers 404. Only a key opens it, with `GET /v1/content/<path>`, or a signed link.
+
+`agentfs sign` prints a signed link. It opens the file with no key for 5 minutes, or the `--ttl` you give, up to 1 hour. The link stops working when the file is overwritten, moved or deleted, and when you rotate the key. In the SDK it is `agent.fs.signedUrl(path)`.
+
+Privacy belongs to the file. Uploading to a private path without a flag keeps it private, and so do `mv`, `fork`, `restore` and `undelete`. `--public` is the only way to make a private file public, and it says so on purpose. A new file is public unless you pass `--private`. Link downloads count toward the monthly limit for signed links too. See [Limits](/reference/limits).
 
 ## A key for one folder
 

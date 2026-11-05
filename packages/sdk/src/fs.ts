@@ -15,6 +15,7 @@ import type { FileInfo } from "./wire.js";
 const PARTS_ABOVE_BYTES = 90 * 1024 * 1024;
 
 type Encoding = BufferEncoding | { encoding?: BufferEncoding };
+type WriteOptions = BufferEncoding | { encoding?: BufferEncoding; private?: boolean };
 type Found =
   | { kind: "file"; file: FileInfo }
   | { kind: "directory" }
@@ -28,8 +29,11 @@ export type FileHandle = {
   fstat(): Promise<Stats>;
 };
 
-const encodingOf = (options: Encoding | undefined) =>
+const encodingOf = (options: WriteOptions | undefined) =>
   typeof options === "string" ? options : options?.encoding;
+
+const privateOf = (options: WriteOptions | undefined) =>
+  typeof options === "string" ? undefined : options?.private;
 
 export class Filesystem {
   private readonly made = new Set<string>();
@@ -103,9 +107,15 @@ export class Filesystem {
     return this.stat(path);
   }
 
+  private bytesOf(file: FileInfo, range?: { start: number; end: number }) {
+    return file.url === null
+      ? this.client.contentAt(file.path, range)
+      : this.client.bytesAt(file.url, range);
+  }
+
   async readBytes(path: string): Promise<Uint8Array> {
     return this.wrapped("open", path, async () =>
-      this.client.bytesAt((await this.regular(path, "open")).url),
+      this.bytesOf(await this.regular(path, "open")),
     );
   }
 
@@ -119,14 +129,15 @@ export class Filesystem {
     return encoding === undefined ? toBuffer(bytes) : decode(bytes, encoding);
   }
 
-  async writeFile(path: string, data: string | Uint8Array, options?: Encoding) {
+  async writeFile(path: string, data: string | Uint8Array, options?: WriteOptions) {
     await this.wrapped("open", path, async () => {
       const body = typeof data === "string" ? encode(data, encodingOf(options) ?? "utf8") : owned(data);
       const sha256 = await sha256Hex(body);
       const target = this.remote(path);
       const direct = body.byteLength > PARTS_ABOVE_BYTES;
-      if (direct) await this.client.uploadDirect(target, body, sha256);
-      else await this.client.put(target, body, sha256);
+      const visibility = { private: privateOf(options) };
+      if (direct) await this.client.uploadDirect(target, body, sha256, visibility);
+      else await this.client.put(target, body, sha256, visibility);
     });
   }
 
@@ -229,10 +240,10 @@ export class Filesystem {
     await this.wrapped("copyfile", src, async () => {
       const file = await this.regular(src, "copyfile");
       const status = await this.client.link([
-        { path: this.remote(dest), sha256: file.sha256, size: file.size },
+        { path: this.remote(dest), sha256: file.sha256, size: file.size, private: file.private || undefined },
       ]);
       if (status === "linked" || status === "unchanged") return;
-      await this.writeFile(dest, await this.readBytes(src));
+      await this.writeFile(dest, await this.readBytes(src), { private: file.private || undefined });
     });
   }
 
@@ -259,8 +270,28 @@ export class Filesystem {
     return { inodes: limits.files, bytesUsed: limits.usedBytes };
   }
 
+  /** The public link of a file. A private file has none: use `signedUrl`. */
   async link(path: string) {
-    return this.wrapped("open", path, async () => (await this.regular(path, "open")).url);
+    return this.wrapped("open", path, async () => {
+      const { url } = await this.regular(path, "open");
+      if (url === null) {
+        throw new AgentFSError({
+          code: "EPERM",
+          message: `EPERM: this file is private and has no public link, use signedUrl, open '${path}'`,
+          syscall: "open",
+          path,
+        });
+      }
+      return url;
+    });
+  }
+
+  /** A link that opens a file with no key until it expires: 300 seconds by default, at most 3600. It stops working when the file is changed or deleted. */
+  async signedUrl(path: string, options: { ttlSeconds?: number } = {}) {
+    return this.wrapped("open", path, async () => {
+      const file = await this.regular(path, "open");
+      return this.client.sign(file.path, options.ttlSeconds);
+    });
   }
 
   async open(path: string): Promise<FileHandle> {
@@ -273,7 +304,7 @@ export class Filesystem {
         const bytes =
           offset >= file.size || size <= 0
             ? new Uint8Array(0)
-            : await this.client.bytesAt(file.url, { start: offset, end: offset + size - 1 });
+            : await this.bytesOf(file, { start: offset, end: offset + size - 1 });
         return toBuffer(bytes);
       },
       pwrite: (offset, data) =>

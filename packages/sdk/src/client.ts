@@ -18,6 +18,7 @@ import {
   readPartUrls,
   readProblem,
   readRestored,
+  readSignedLink,
   readSnapshot,
   readStarted,
   readToolEvent,
@@ -31,6 +32,22 @@ export type Headed =
   | { kind: "missing"; requestId: string | null };
 
 type Init = { method?: string; body?: BodyInit; headers?: Record<string, string> };
+
+/** `private: true` gives a file no public link, `false` makes it public, and leaving it out keeps what the file has. */
+export type Visibility = { private?: boolean };
+type ByteRange = { start: number; end: number };
+
+const visibilityHeader = ({ private: hidden }: Visibility): Record<string, string> =>
+  hidden === undefined ? {} : { "x-agentfs-private": String(hidden) };
+
+const rangeHeader = (range: ByteRange | undefined): Record<string, string> =>
+  range === undefined ? {} : { range: `bytes=${range.start}-${range.end}` };
+
+const bytesOf = async (response: Response, range: ByteRange | undefined) => {
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (range === undefined || response.status === 206) return bytes;
+  return bytes.slice(range.start, range.end + 1);
+};
 
 const failure = async (response: Response) => {
   const requestId = response.headers.get("x-request-id");
@@ -107,9 +124,10 @@ export class Client {
     const header = (name: string) => response.headers.get(name);
     const lastModified = header("last-modified");
     const url = header("x-agentfs-url");
+    const hidden = header("x-agentfs-private") === "true";
     const etag = header("etag");
     const size = Number(header("content-length"));
-    if (lastModified === null || url === null || etag === null || !Number.isFinite(size)) {
+    if (lastModified === null || (url === null && !hidden) || etag === null || !Number.isFinite(size)) {
       throw new AgentFSError({ code: "bad_response", message: "bad_response: HEAD answer is missing headers." });
     }
     return {
@@ -121,6 +139,7 @@ export class Client {
         contentType: header("content-type") ?? "application/octet-stream",
         updatedAt: new Date(lastModified).toISOString(),
         url,
+        private: hidden,
       },
     };
   }
@@ -143,12 +162,12 @@ export class Client {
     return { files, folders };
   }
 
-  async put(path: string, body: Bytes, sha256: string) {
+  async put(path: string, body: Bytes, sha256: string, options: Visibility = {}) {
     return readFile(
       await this.read(`/v1/files/${segments(path)}`, {
         method: "PUT",
         body,
-        headers: { "x-sha256": sha256 },
+        headers: { "x-sha256": sha256, ...visibilityHeader(options) },
       }),
     );
   }
@@ -165,7 +184,7 @@ export class Client {
     await this.send("/v1/files/move", json("POST", { from, to }));
   }
 
-  async link(files: { path: string; sha256: string; size: number }[]) {
+  async link(files: ({ path: string; sha256: string; size: number } & Visibility)[]) {
     return readLinkStatus(await this.read("/v1/files", json("POST", { files })));
   }
 
@@ -173,16 +192,21 @@ export class Client {
     return readLimits(await this.read("/v1/limits"));
   }
 
-  async bytesAt(url: string, range?: { start: number; end: number }): Promise<Uint8Array> {
-    const response = await attempt(url, {
-      headers: range === undefined ? {} : { range: `bytes=${range.start}-${range.end}` },
-    });
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (range === undefined || response.status === 206) return bytes;
-    return bytes.slice(range.start, range.end + 1);
+  async bytesAt(url: string, range?: ByteRange): Promise<Uint8Array> {
+    return bytesOf(await attempt(url, { headers: rangeHeader(range) }), range);
   }
 
-  async uploadDirect(path: string, body: Bytes, sha256: string) {
+  /** Reads a file's bytes with the key, which is the only way to read a private file without a signed link. */
+  async contentAt(path: string, range?: ByteRange): Promise<Uint8Array> {
+    const response = await this.send(`/v1/content/${segments(path)}`, { headers: rangeHeader(range) });
+    return bytesOf(response, range);
+  }
+
+  async sign(path: string, ttlSeconds: number | undefined) {
+    return readSignedLink(await this.read("/v1/files/sign", json("POST", { path, ttlSeconds })));
+  }
+
+  async uploadDirect(path: string, body: Bytes, sha256: string, options: Visibility = {}) {
     const started = readStarted(
       await this.read("/v1/uploads", json("POST", { path, sha256, size: body.byteLength, direct: true })),
     );
@@ -227,7 +251,7 @@ export class Client {
     try {
       await Promise.all(Array.from({ length: Math.min(PART_WORKERS, partCount) }, worker));
       parts.sort((a, b) => a.partNumber - b.partNumber);
-      return readFile(await this.read(`${base}/complete`, json("POST", { path, sha256, parts })));
+      return readFile(await this.read(`${base}/complete`, json("POST", { path, sha256, parts, private: options.private })));
     } catch (error) {
       await this.send(base, { method: "DELETE" }).catch(() => null);
       throw error;

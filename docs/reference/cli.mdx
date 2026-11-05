@@ -51,12 +51,22 @@ A command that deletes or overwrites asks first in a terminal. Where there is no
 ### put
 
 ```bash
-agentfs put <file or folder>... [--to folder] [--force] [--ttl 1d] [--include-secrets]
+agentfs put <file or folder>... [--to folder] [--force] [--ttl 1d] [--private | --public] [--include-secrets]
 ```
 
-Uploads files and prints one link per file. Unchanged files and bytes the account already has are not sent. In a git repo, `put` uploads only what git tracks or would track. It skips `.env` files, `*.pem` and `*.key` files and SSH keys, and says which.
+Uploads files and prints one link per file. A private file prints its path and no link. Unchanged files and bytes the account already has are not sent. In a git repo, `put` uploads only what git tracks or would track. It skips `.env` files, `*.pem` and `*.key` files and SSH keys, and says which.
 
 A file that changed remotely since the listing is not overwritten. It is reported as `conflict` and the exit code is 3. `--force` overwrites it. `--ttl` deletes the files after that long, like `30m`, `1h` or `1d`. Big files go straight to storage in parts and resume if interrupted.
+
+`--private` uploads a file with no link. A private file stays private when you upload to its path again without a flag. `--public` makes it public. `ls` and `stat` show `private` where the link would be. `pull`, `sync` and `export` read private files with your key.
+
+### sign
+
+```bash
+agentfs sign <path> [--ttl 5m]
+```
+
+Prints a link that opens the file without a key. It works for 5 minutes, or `--ttl`, up to 1 hour.
 
 ### pull
 

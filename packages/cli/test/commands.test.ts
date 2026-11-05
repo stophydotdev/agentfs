@@ -166,6 +166,7 @@ test("stat prints what the HEAD headers say about a file", async () => {
     updatedAt: "2026-10-29T10:30:00.000Z",
     expiresAt: "2026-10-30T10:30:00.000Z",
     verified: false,
+    private: false,
     url: "https://files.test/docs/a%20b.txt",
     agent: "claude-code",
     session: null,
@@ -921,4 +922,79 @@ test("claim gives the human the link and both deadlines, or the server's message
 
   script.set("POST /v1/claim", () => Response.json({ ...link, message: "Open the link." }));
   expect(JSON.parse((await agentfs.piped("claim")).stdout)).toEqual({ ...link, message: "Open the link." });
+});
+
+const privateFile = (path: string) => ({ ...file(path, null), url: null, private: true });
+
+test("put --private asks for a private file, and prints no link for it", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "agentfs-private-"));
+  await writeFile(join(dir, "page.html"), "<h1>secret</h1>");
+  script.set("GET /v1/limits", () => Response.json(limitsBody(null)));
+  script.set("POST /v1/files", () =>
+    Response.json({ files: [{ path: "cache/page.html", status: "missing", current: null }] }),
+  );
+  script.set("PUT /v1/files/cache/page.html", () =>
+    Response.json({ ...privateFile("cache/page.html"), status: "uploaded" }),
+  );
+  const result = await runner(server, config, dir)(
+    "put", "page.html", "--to", "cache", "--private",
+  );
+  expect(result.stdout).toBe("cache/page.html (private, no public link)\n");
+  const linkBody = seen.find(({ method, path }) => method === "POST" && path === "/v1/files")?.body ?? "";
+  expect(JSON.parse(linkBody).files[0].private).toBe(true);
+  const put = seen.find(({ method }) => method === "PUT");
+  expect(put?.headers.get("x-agentfs-private")).toBe("true");
+
+  const both = await runner(server, config, dir)("put", "page.html", "--private", "--public");
+  expect(both.code).not.toBe(0);
+  expect(both.stderr).toContain("use --private or --public, not both");
+  await runner(server, config, dir)("put", "page.html", "--to", "cache", "--public", "--force");
+  const second = seen.findLast(({ method }) => method === "PUT");
+  expect(second?.headers.get("x-agentfs-private")).toBe("false");
+});
+
+test("put without a flag sends no private header, so a private file keeps its privacy", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "agentfs-private-"));
+  await writeFile(join(dir, "again.txt"), "again");
+  script.set("PUT /v1/files/again.txt", () =>
+    Response.json({ ...privateFile("again.txt"), status: "uploaded" }),
+  );
+  await runner(server, config, dir)("put", "again.txt");
+  expect(seen.find(({ method }) => method === "PUT")?.headers.has("x-agentfs-private")).toBe(false);
+});
+
+test("sign prints the signed link and sends the lifetime in seconds", async () => {
+  script.set("POST /v1/files/sign", () =>
+    Response.json({ url: "https://files.test/acct/a.txt?token=1.abc", expiresAt: "2026-11-05T00:05:00.000Z" }),
+  );
+  const result = await agentfs("sign", "a.txt", "--ttl", "5m");
+  expect(result.stdout).toBe("https://files.test/acct/a.txt?token=1.abc\n");
+  expect(JSON.parse(lastRequest()?.body ?? "{}")).toEqual({ path: "a.txt", ttlSeconds: 300 });
+});
+
+test("ls and stat show a private file as private", async () => {
+  script.set("GET /v1/files", () =>
+    Response.json({ files: [privateFile("cache/a.txt")], folders: [], cursor: null }),
+  );
+  const listed = await agentfs("ls", "cache");
+  expect(listed.stdout).toBe("cache/a.txt\t2 KB\t-\t-\tprivate\n");
+  script.set("HEAD /v1/files/cache/b.txt", () => {
+    const { "x-agentfs-url": _omitted, ...headers } = HEAD;
+    return new Response(null, { headers: { ...headers, "x-agentfs-private": "true" } });
+  });
+  const stat = await agentfs("stat", "cache/b.txt");
+  expect(stat.stdout).toContain("private   true\nlink      none, the file is private\n");
+});
+
+test("pull reads a private file with the key, because it has no link", async () => {
+  const into = await mkdtemp(join(tmpdir(), "agentfs-pull-"));
+  const sha256 = new Bun.CryptoHasher("sha256").update("secret").digest("hex");
+  script.set("GET /v1/files", () =>
+    Response.json({ files: [{ ...privateFile("cache/s.txt"), sha256 }], folders: [], cursor: null }),
+  );
+  script.set("GET /v1/content/cache/s.txt", () => new Response("secret"));
+  await runner(server, config, into)("pull", "cache");
+  expect(await readFile(join(into, "cache", "s.txt"), "utf8")).toBe("secret");
+  const read = seen.find(({ path }) => path === "/v1/content/cache/s.txt");
+  expect(read?.headers.get("authorization")).toStartWith("Bearer afs_");
 });

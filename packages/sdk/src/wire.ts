@@ -9,8 +9,10 @@ export type FileInfo = {
   sha256: string;
   contentType: string;
   updatedAt: string;
-  url: string;
+  url: string | null;
+  private: boolean;
 };
+export type SignedLink = { url: string; expiresAt: string };
 export type Listing = { files: FileInfo[]; folders: string[]; cursor: string | null };
 export type Started = { upload: string; uploadId: string; partBytes: number; partUrls: string[] };
 export type Snapshot = { name: string; prefix: string; files: number; bytes: number; createdAt: string };
@@ -107,8 +109,14 @@ export const readFile = (value: unknown): FileInfo => {
     sha256: text(file, "sha256"),
     contentType: text(file, "contentType"),
     updatedAt: text(file, "updatedAt"),
-    url: text(file, "url"),
+    url: maybeText(file, "url"),
+    private: file.private === true,
   };
+};
+
+export const readSignedLink = (value: unknown): SignedLink => {
+  const link = fields(value, "signed link");
+  return { url: text(link, "url"), expiresAt: text(link, "expiresAt") };
 };
 
 export const readListing = (value: unknown): Listing => {

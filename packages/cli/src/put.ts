@@ -19,6 +19,7 @@ export type PutOutcome =
 type WriteOptions = {
   force: boolean;
   ttlSeconds: number | undefined;
+  private?: boolean | undefined;
   expected?: Map<string, string | null>;
 };
 
@@ -39,7 +40,7 @@ const linkAll = async (api: Api, entries: LinkEntry[]) => {
 export const putLocals = async (
   api: Api,
   locals: Local[],
-  { force, ttlSeconds, expected }: WriteOptions,
+  { force, ttlSeconds, expected, private: hidden }: WriteOptions,
 ) => {
   const [{ maxFileBytes, plan }, hashed] = await Promise.all([
     api.limits(),
@@ -49,7 +50,9 @@ export const putLocals = async (
       size: (await stat(local.file)).size,
     })),
   ]);
-  const entries = hashed.map(({ path, sha256, size }): LinkEntry => ({ path, sha256, size, ttlSeconds }));
+  const entries = hashed.map(
+    ({ path, sha256, size }): LinkEntry => ({ path, sha256, size, ttlSeconds, private: hidden }),
+  );
   const guardOf = (path: string): Pick<LinkEntry, "ifMatch" | "ifNoneMatch"> => {
     if (expected === undefined) return force ? {} : { ifNoneMatch: true };
     const sha256 = expected.get(path) ?? null;
@@ -85,6 +88,7 @@ export const putLocals = async (
             ? expectation(force, answer?.status === "missing" ? answer.current : null)
             : expectation(false, expected.get(local.path) ?? null),
         ttlSeconds,
+        private: hidden,
       };
       const file =
         local.size > PARTS_ABOVE_BYTES

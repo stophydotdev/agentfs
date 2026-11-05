@@ -175,6 +175,50 @@ describe("fs", () => {
   });
 });
 
+describe("private files", () => {
+  test("a private write has no public link, and readFile, copyFile and pread use the key", async () => {
+    const agent = await open();
+    stub.seen.requests.length = 0;
+    await agent.fs.writeFile("/cache/a.html", "<h1>secret</h1>", { private: true });
+    expect(stub.files.get("cache/a.html")?.private).toBe(true);
+    expect((await caught(agent.fs.link("/cache/a.html"))).code).toBe("EPERM");
+    expect(await agent.fs.readFile("/cache/a.html", "utf8")).toBe("<h1>secret</h1>");
+    expect(stub.seen.requests).toContain("GET /v1/content/cache/a.html");
+    expect(stub.seen.requests.some((request) => request.startsWith(`GET /${stub.account}/`))).toBe(false);
+    const handle = await agent.fs.open("/cache/a.html");
+    expect((await handle.pread(4, 6)).toString()).toBe("secret");
+
+    await agent.fs.copyFile("/cache/a.html", "/cache/b.html");
+    expect(stub.files.get("cache/b.html")?.private).toBe(true);
+  });
+
+  test("a write without the option keeps a private file private, and private: false makes it public", async () => {
+    const agent = await open();
+    await agent.fs.writeFile("/n.txt", "one", { private: true });
+    await agent.fs.writeFile("/n.txt", "two");
+    expect(stub.files.get("n.txt")?.private).toBe(true);
+    await agent.fs.writeFile("/n.txt", "three", { encoding: "utf8", private: false });
+    expect(stub.files.get("n.txt")?.private).toBe(false);
+    expect(await agent.fs.link("/n.txt")).toStartWith(`${stub.url}/${stub.account}/n.txt`);
+  });
+
+  test("signedUrl asks for a link that opens the file without a key", async () => {
+    const agent = await open();
+    await agent.fs.writeFile("/s.txt", "signed", { private: true });
+    const link = await agent.fs.signedUrl("/s.txt", { ttlSeconds: 60 });
+    expect(stub.seen.signs).toEqual([{ path: "s.txt", ttlSeconds: 60 }]);
+    expect(await (await fetch(link.url)).text()).toBe("signed");
+    expect((await fetch(link.url.replace("?token=signed", ""))).status).toBe(404);
+    expect((await caught(agent.fs.signedUrl("/missing.txt"))).code).toBe("ENOENT");
+  });
+
+  test("a private file above the part size goes up in parts and stays private", async () => {
+    const agent = await open();
+    await agent.fs.writeFile("/big.bin", new Uint8Array(91 * MB), { private: true });
+    expect(stub.files.get("big.bin")?.private).toBe(true);
+  });
+});
+
 describe("kv", () => {
   test("set, get, list and delete round trip JSON under the prefix", async () => {
     const agent = await open("runs/42/");

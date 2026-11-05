@@ -14,7 +14,8 @@ description: "Every word the docs use, defined once."
 | path | A file's name: `reports/run.html`. Parts are separated by `/`, and none can be empty, `.` or `..`. It can be up to 900 characters. |
 | folder | A path that ends in `/`, like `reports/`. You never create one. Put a file under it and it exists. |
 | blob | The bytes of a file, named by their sha256. Two files with the same bytes in one account share one blob, so a copy sends and stores nothing. |
-| link | The public address of a file: `https://agentfs.cloud/<account>/<path>`. Every link is public: anyone who has it can open the file, and no key is needed. Uploading to the same path again keeps the link. It stops working after a delete, a move or rename, when the file expires, or when the download limit is reached. See [Keys and sharing](/guides/keys-and-sharing). |
+| link | The public address of a file: `https://agentfs.cloud/<account>/<path>`. A link is public: anyone who has it can open the file, and no key is needed. A private file has no link. Uploading to the same path again keeps the link. It stops working after a delete, a move or rename, when the file expires, or when the download limit is reached. See [Keys and sharing](/guides/keys-and-sharing). |
+| private | A file with no link. A key reads it, or a signed link does for a few minutes. See [Keys and sharing](/guides/keys-and-sharing). |
 | upload | A big file sent in parts. You start it, send each part, then complete it. A direct upload sends each part straight to storage. It is for big files, and the file must fit your plan. See [Limits](/reference/limits). `agentfs put` does this for you. |
 | verified | A field on a file, and the `x-agentfs-verified` header. True when agentfs hashed the bytes itself. False for a direct upload, where the sha256 is the one the client declared. |
 | fork | A copy of a folder at a new folder. It points at the same bytes, so it is instant and uses no storage. |

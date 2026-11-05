@@ -82,7 +82,7 @@ const build = async (api: Api, prefix: string, db: Sqlite) => {
   const failures = (
     await inParallel(files, async (file) => {
       try {
-        const response = await fetch(file.url);
+        const response = file.url === null ? await api.content(file.path) : await fetch(file.url);
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         const bytes = new Uint8Array(await response.arrayBuffer());
         if (createHash("sha256").update(bytes).digest("hex") !== file.sha256) {

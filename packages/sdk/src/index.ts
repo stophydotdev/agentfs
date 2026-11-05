@@ -16,4 +16,4 @@ export {
   type Stats,
   type StatsData,
 } from "./stats.js";
-export type { Diff, Restored, Snapshot } from "./wire.js";
+export type { Diff, Restored, SignedLink, Snapshot } from "./wire.js";

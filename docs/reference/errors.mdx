@@ -25,8 +25,10 @@ The message says what to do next. The table lists every code the server can retu
 | `invalid_kv` | 400 | Use a key of 1 to 512 letters, digits, dots, colons, @, / or -, and send a JSON body. |
 | `invalid_move` | 400 | Send JSON &#123; from, to &#125;: two files, or two folders ending in /, neither inside the other. |
 | `invalid_path` | 400 | Use a relative path like reports/run.html, with no empty, . or .. parts. |
+| `invalid_private` | 400 | Send x-agentfs-private as true or false. |
 | `invalid_report` | 400 | Send JSON &#123; url, reason &#125;: the link and why it should come down. |
 | `invalid_sha256` | 400 | Send x-sha256: the file's sha256 as 64 lowercase hex characters, as `sha256sum <file>` prints it. |
+| `invalid_sign` | 400 | Send JSON &#123; path, ttlSeconds &#125;: the file's path and optionally 1 to 3600 seconds, 300 by default. |
 | `invalid_signature` | 400 | Billing routes only: the signature header does not match the request. |
 | `invalid_snapshot` | 400 | Send JSON &#123; name, prefix &#125;: a name of 1 to 64 letters, digits, dots, dashes or underscores, and an optional folder. |
 | `invalid_ttl` | 400 | Send a ttl of 60 to 31536000 seconds in x-agentfs-ttl, or ttlSeconds in a batch entry. |

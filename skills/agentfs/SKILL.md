@@ -28,7 +28,7 @@ The commands you will use most:
 Rules:
 
 - Put each task's files in its own folder, like `runs/<task>`, and give the user the links.
-- Every link is public: anyone who has it can open the file. Never upload secrets. Never add `--include-secrets` unless the user asks.
+- Every link is public: anyone who has it can open the file. Never upload secrets. A file uploaded with `--private` has no link: read it with your key, or run `agentfs sign <path>` for a link that lasts minutes. Never add `--include-secrets` unless the user asks.
 - If `put` reports `conflict` and exits 3, the file changed remotely since you listed it. Tell the user. Add `--force` only when they say to overwrite.
 - Give a sub-agent a scoped key, set as `AGENTFS_KEY`, never your full key.
 - Unclaimed accounts hold 1 GB and are deleted 24 hours after the first upload. A person signs in with GitHub or Google to keep them, and gets 2 GB free. Run `agentfs claim` and give the user the link and the deadline it prints.

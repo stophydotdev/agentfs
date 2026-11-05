@@ -2,7 +2,7 @@ import { openAsBlob } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { type Api, ApiError, type Part, type Wanted, type Write, configDir, putToUrl } from "./api";
+import { type Api, ApiError, type FileWrite, type Part, type Wanted, configDir, putToUrl } from "./api";
 import { inParallel } from "./local";
 
 const ATTEMPTS = 3;
@@ -65,13 +65,13 @@ const sendPart = async (urls: ReturnType<typeof partUrls>, partNumber: number, b
   throw new Error(`storage refused part ${partNumber} with a fresh URL`);
 };
 
-const begin = async (api: Api, local: Wanted, write: Write) => {
+const begin = async (api: Api, local: Wanted, write: FileWrite) => {
   const { upload, uploadId, partBytes, partUrls: first } = await api.startUpload(local, write.ttlSeconds);
   const progress: Progress = { upload, uploadId, partBytes, direct: true, done: [] };
   return { progress, first };
 };
 
-const sendParts = async (api: Api, local: Wanted & { file: string }, write: Write) => {
+const sendParts = async (api: Api, local: Wanted & { file: string }, write: FileWrite) => {
   const existing = await resumed(api, local.sha256);
   const { progress, first } = existing === undefined ? await begin(api, local, write) : { progress: existing, first: [] };
   const urls = partUrls(api, progress);
@@ -92,10 +92,10 @@ const sendParts = async (api: Api, local: Wanted & { file: string }, write: Writ
     await remember(api, local.sha256, progress);
   });
   const parts = progress.done.toSorted((a, b) => a.partNumber - b.partNumber);
-  return api.completeUpload(progress.upload, progress.uploadId, local, parts, write.precondition);
+  return api.completeUpload(progress.upload, progress.uploadId, local, parts, write.precondition, write.private);
 };
 
-export const uploadInParts = async (api: Api, local: Wanted & { file: string }, write: Write) => {
+export const uploadInParts = async (api: Api, local: Wanted & { file: string }, write: FileWrite) => {
   const file = await sendParts(api, local, write).catch(async (error: Error) => {
     if (!(error instanceof ApiError && error.code === "upload_failed")) throw error;
     await rm(stateFile(api, local.sha256), { force: true });

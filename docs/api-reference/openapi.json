@@ -932,7 +932,13 @@
                             "type": "boolean"
                           },
                           "url": {
-                            "type": "string"
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "private": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -946,6 +952,7 @@
                           "updatedAt",
                           "expiresAt",
                           "verified",
+                          "private",
                           "url"
                         ],
                         "additionalProperties": false
@@ -1068,6 +1075,10 @@
                         },
                         "ttlSeconds": {
                           "type": "number"
+                        },
+                        "private": {
+                          "description": "true: no public link, readable with a key or a signed link. false: public. Leave it out to keep what the file has, public for a new file.",
+                          "type": "boolean"
                         }
                       },
                       "required": [
@@ -1143,7 +1154,10 @@
                                 "type": "boolean"
                               },
                               "url": {
-                                "type": "string"
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
                               },
                               "status": {
                                 "type": "string",
@@ -1151,6 +1165,9 @@
                                   "linked",
                                   "unchanged"
                                 ]
+                              },
+                              "private": {
+                                "type": "boolean"
                               }
                             },
                             "required": [
@@ -1165,6 +1182,7 @@
                               "expiresAt",
                               "verified",
                               "url",
+                              "private",
                               "status"
                             ],
                             "additionalProperties": false
@@ -1480,7 +1498,10 @@
                       "type": "boolean"
                     },
                     "url": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "status": {
                       "type": "string",
@@ -1489,6 +1510,9 @@
                         "unchanged",
                         "restored"
                       ]
+                    },
+                    "private": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -1502,6 +1526,7 @@
                     "updatedAt",
                     "expiresAt",
                     "verified",
+                    "private",
                     "url",
                     "status"
                   ],
@@ -1593,7 +1618,13 @@
                       "type": "boolean"
                     },
                     "url": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "private": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -1607,6 +1638,7 @@
                     "updatedAt",
                     "expiresAt",
                     "verified",
+                    "private",
                     "url"
                   ],
                   "additionalProperties": false
@@ -1770,6 +1802,16 @@
               "type": "string"
             },
             "description": "Seconds until the file expires, 60 to 31536000."
+          },
+          {
+            "name": "x-agentfs-private",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "description": "true: no public link, readable with a key or a signed link. false: public. Leave it out to keep what the file has, public for a new file.",
+              "type": "string"
+            },
+            "description": "true: no public link, readable with a key or a signed link. false: public. Leave it out to keep what the file has, public for a new file."
           }
         ],
         "responses": {
@@ -1823,7 +1865,10 @@
                       "type": "boolean"
                     },
                     "url": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "status": {
                       "type": "string",
@@ -1832,6 +1877,9 @@
                         "unchanged",
                         "restored"
                       ]
+                    },
+                    "private": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -1845,6 +1893,7 @@
                     "updatedAt",
                     "expiresAt",
                     "verified",
+                    "private",
                     "url",
                     "status"
                   ],
@@ -2310,6 +2359,10 @@
                         "etag"
                       ]
                     }
+                  },
+                  "private": {
+                    "description": "true: no public link, readable with a key or a signed link. false: public. Leave it out to keep what the file has, public for a new file.",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -2372,7 +2425,10 @@
                       "type": "boolean"
                     },
                     "url": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "status": {
                       "type": "string",
@@ -2381,6 +2437,9 @@
                         "unchanged",
                         "restored"
                       ]
+                    },
+                    "private": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -2394,6 +2453,7 @@
                     "updatedAt",
                     "expiresAt",
                     "verified",
+                    "private",
                     "url",
                     "status"
                   ],
@@ -3960,6 +4020,142 @@
           }
         }
       }
+    },
+    "/v1/content/{path}": {
+      "get": {
+        "summary": "Read a file's bytes with a key, including a private file. Answers Range requests",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "x-access": "key",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-agentfs-account",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "With a session instead of a key: the id of an account you own. Required with the session."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file's bytes, with content-type and etag. Never cached by shared caches."
+          },
+          "206": {
+            "description": "The requested byte range."
+          },
+          "default": {
+            "description": "An error, with a code that says what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/files/sign": {
+      "post": {
+        "summary": "Make a link to a file that works for a few minutes, with no key",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "x-access": "key",
+        "parameters": [
+          {
+            "name": "x-agentfs-account",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "With a session instead of a key: the id of an account you own. Required with the session."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "maxLength": 900
+                  },
+                  "ttlSeconds": {
+                    "default": 300,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3600
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "expiresAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error, with a code that says what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4021,7 +4217,9 @@
                   "upload_failed",
                   "upload_incomplete",
                   "length_required",
-                  "server_error"
+                  "server_error",
+                  "invalid_private",
+                  "invalid_sign"
                 ]
               },
               "message": {
@@ -4263,6 +4461,16 @@
       "code": "server_error",
       "status": 500,
       "message": "Something failed on our side. Retry, and if it keeps failing, send feedback."
+    },
+    {
+      "code": "invalid_private",
+      "status": 400,
+      "message": "Send x-agentfs-private as true or false."
+    },
+    {
+      "code": "invalid_sign",
+      "status": 400,
+      "message": "Send JSON { path, ttlSeconds }: the file's path and optionally 1 to 3600 seconds, 300 by default."
     }
   ]
 }

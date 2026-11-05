@@ -17,7 +17,8 @@ const remoteFile = z.object({
   updatedAt: z.string(),
   expiresAt: z.string().nullable(),
   verified: z.boolean(),
-  url: z.string(),
+  private: z.boolean().default(false),
+  url: z.string().nullable(),
 });
 const page = z.object({
   files: z.array(remoteFile),
@@ -34,7 +35,11 @@ const statted = z.object({
     .transform((date) => date.toISOString()),
   expiresAt: z.string().nullable(),
   verified: z.enum(["true", "false"]).transform((verified) => verified === "true"),
-  url: z.string(),
+  private: z
+    .enum(["true", "false"])
+    .nullable()
+    .transform((hidden) => hidden === "true"),
+  url: z.string().nullable(),
   agent: z.string().nullable(),
   session: z.string().nullable(),
   commit: z.string().nullable(),
@@ -137,6 +142,7 @@ const started = z.object({
 const partUrlPage = z.object({ from: z.number(), partUrls: z.array(z.string()) });
 const part = z.object({ partNumber: z.number(), etag: z.string() });
 const forked = z.object({ from: z.string(), to: z.string(), copied: z.number() });
+const signedLink = z.object({ url: z.string(), expiresAt: z.string() });
 const claimLink = z.object({ url: z.string(), expiresAt: z.string(), message: z.string().optional() });
 const issuedKey = z.object({ key: z.string() });
 const keyInfo = z.object({
@@ -182,8 +188,11 @@ export type Part = z.infer<typeof part>;
 export type Wanted = { path: string; sha256: string; size: number };
 export type Precondition = { kind: "none" } | { kind: "absent" } | { kind: "match"; etag: string };
 export type Write = { precondition: Precondition; ttlSeconds: number | undefined };
+/** `true` gives the file no public link, `false` makes it public, and `undefined` keeps what the file has. */
+export type FileWrite = Write & { private?: boolean | undefined };
 export type LinkEntry = Wanted & {
   ttlSeconds: number | undefined;
+  private?: boolean | undefined;
   ifMatch?: string;
   ifNoneMatch?: true;
 };
@@ -340,6 +349,9 @@ const guard = (precondition: Precondition): Record<string, string> => {
 const expiry = (ttlSeconds: number | undefined): Record<string, string> =>
   ttlSeconds === undefined ? {} : { "x-agentfs-ttl": String(ttlSeconds) };
 
+const hiding = (hidden: boolean | undefined): Record<string, string> =>
+  hidden === undefined ? {} : { "x-agentfs-private": String(hidden) };
+
 const segments = (path: string) => path.split("/").map(encodeURIComponent).join("/");
 
 export const connect = async (given?: { key: string; source: KeySource }) => {
@@ -399,6 +411,7 @@ export const connect = async (given?: { key: string; source: KeySource }) => {
           updatedAt: header("last-modified"),
           expiresAt: header("x-agentfs-expires-at"),
           verified: header("x-agentfs-verified"),
+          private: header("x-agentfs-private"),
           url: header("x-agentfs-url"),
           agent: header("x-agentfs-agent"),
           session: header("x-agentfs-session"),
@@ -408,7 +421,7 @@ export const connect = async (given?: { key: string; source: KeySource }) => {
     },
     link: async (files: LinkEntry[]) =>
       linked.parse(await (await post("/v1/files", JSON.stringify({ files }))).json()).files,
-    upload: async (file: Wanted, body: Blob, { precondition, ttlSeconds }: Write) => {
+    upload: async (file: Wanted, body: Blob, { precondition, ttlSeconds, private: hidden }: FileWrite) => {
       const init = {
         method: "PUT",
         body,
@@ -416,6 +429,7 @@ export const connect = async (given?: { key: string; source: KeySource }) => {
           ...headers,
           ...guard(precondition),
           ...expiry(ttlSeconds),
+          ...hiding(hidden),
           "x-sha256": file.sha256,
         },
       };
@@ -445,16 +459,20 @@ export const connect = async (given?: { key: string; source: KeySource }) => {
       file: Wanted,
       parts: Part[],
       precondition: Precondition,
+      hidden: boolean | undefined,
     ) =>
       uploaded.parse(
         await (
           await send(`${uploadPath(upload, uploadId)}/complete`, {
             method: "POST",
-            body: JSON.stringify({ path: file.path, sha256: file.sha256, parts }),
+            body: JSON.stringify({ path: file.path, sha256: file.sha256, parts, private: hidden }),
             headers: { ...headers, ...guard(precondition), "content-type": "application/json" },
           })
         ).json(),
       ),
+    sign: async (path: string, ttlSeconds: number | undefined) =>
+      signedLink.parse(await (await post("/v1/files/sign", JSON.stringify({ path, ttlSeconds }))).json()),
+    content: (path: string) => send(`/v1/content/${segments(path)}`, { headers }),
     remove: async (path: string, precondition: Precondition = { kind: "none" }) => {
       await send(`/v1/files/${segments(path)}`, {
         method: "DELETE",

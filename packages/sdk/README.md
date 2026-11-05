@@ -60,6 +60,8 @@ Every request carries `User-Agent: agentfs-sdk/<version>`, except in browsers, w
 
 Extras: `exists(path)`, `readBytes(path)` and `link(path)`, which returns the public URL.
 
+`writeFile(path, data, { private: true })` uploads a file with no public link, and `{ private: false }` makes it public. Leave `private` out and a file keeps what it has. `readFile` reads a private file with your key. `link(path)` throws `EPERM` for a private file. `signedUrl(path, { ttlSeconds })` returns `{ url, expiresAt }`: a link that opens the file with no key, for 300 seconds by default and at most 3600.
+
 ## agent.kv
 
 `get`, `set`, `delete` and `list(prefix)` store JSON up to 64 KB. Keys are 1 to 512 characters of letters, digits and `_ . : @ / -`. The `prefix` option applies to keys too.

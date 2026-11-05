@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-type Stored = { bytes: Uint8Array<ArrayBuffer>; sha256: string; updatedAt: Date };
+type Stored = { bytes: Uint8Array<ArrayBuffer>; sha256: string; updatedAt: Date; private?: boolean };
 type Upload = { path: string; size: number; parts: Map<number, Uint8Array<ArrayBuffer>> };
 type Event = {
   id: string;
@@ -33,7 +33,7 @@ export const startStub = (options: StubOptions = {}) => {
   const events: Event[] = [];
   const snapshots = new Map<string, { prefix: string; files: Map<string, Stored> }>();
   const uploads = new Map<string, Upload>();
-  const seen = { userAgents: new Set<string>(), writeAgents: [] as (string | null)[], readAgents: [] as (string | null)[], signups: 0, partFetches: 0, authorizations: new Set<string>(), aborted: 0, requests: [] as string[] };
+  const seen = { userAgents: new Set<string>(), writeAgents: [] as (string | null)[], readAgents: [] as (string | null)[], signups: 0, partFetches: 0, authorizations: new Set<string>(), aborted: 0, requests: [] as string[], signs: [] as { path: string; ttlSeconds: number | undefined }[] };
   let requestCounter = 0;
   let nextEvent = 1;
 
@@ -61,8 +61,11 @@ export const startStub = (options: StubOptions = {}) => {
         updatedAt: stored.updatedAt.toISOString(),
         expiresAt: null,
         verified: true,
-        url: linkOf(path),
+        private: stored.private === true,
+        url: stored.private === true ? null : linkOf(path),
       });
+      const visibility = (header: string | null, current: Stored | undefined) =>
+        header === null ? current?.private === true : header === "true";
       seen.requests.push(`${request.method} ${url.pathname}`);
       seen.userAgents.add(request.headers.get("user-agent") ?? "");
       if (url.pathname.startsWith("/v1/")) {
@@ -78,7 +81,9 @@ export const startStub = (options: StubOptions = {}) => {
       if (url.pathname.startsWith(`/${ACCOUNT}/`)) {
         const path = decodeURIComponent(url.pathname.slice(ACCOUNT.length + 2));
         const stored = files.get(path);
-        if (stored === undefined) return problem("not_found", "Nothing is here.", 404);
+        if (stored === undefined || (stored.private === true && url.searchParams.get("token") !== "signed")) {
+          return problem("not_found", "Nothing is here.", 404);
+        }
         const range = /^bytes=(\d+)-(\d+)$/u.exec(request.headers.get("range") ?? "");
         if (range === null) return new Response(stored.bytes);
         const [, from = "0", to = "0"] = range;
@@ -103,6 +108,22 @@ export const startStub = (options: StubOptions = {}) => {
         let used = 0;
         for (const stored of files.values()) used += stored.bytes.byteLength;
         return reply({ plan: "free", usedBytes: used, files: files.size, maxFileBytes });
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/files/sign") {
+        const body: { path: string; ttlSeconds?: number } = await request.json();
+        seen.signs.push({ path: body.path, ttlSeconds: body.ttlSeconds });
+        if (!files.has(body.path)) return problem("not_found", "Nothing is here.", 404);
+        return reply({ url: `${linkOf(body.path)}?token=signed`, expiresAt: "2026-11-05T00:05:00.000Z" });
+      }
+
+      if (request.method === "GET" && url.pathname.startsWith("/v1/content/")) {
+        const stored = files.get(decodeURIComponent(url.pathname.slice("/v1/content/".length)));
+        if (stored === undefined) return problem("not_found", "Nothing is here.", 404);
+        const range = /^bytes=(\d+)-(\d+)$/u.exec(request.headers.get("range") ?? "");
+        if (range === null) return new Response(stored.bytes);
+        const [, from = "0", to = "0"] = range;
+        return new Response(stored.bytes.slice(Number(from), Number(to) + 1), { status: 206 });
       }
 
       if (url.pathname.startsWith("/v1/files") && !url.pathname.startsWith("/v1/files/move")) {
@@ -144,11 +165,11 @@ export const startStub = (options: StubOptions = {}) => {
           return reply({ prefix, deleted });
         }
         if (request.method === "POST" && isCollection) {
-          const body: { files: { path: string; sha256: string; size: number }[] } = await request.json();
+          const body: { files: { path: string; sha256: string; size: number; private?: boolean }[] } = await request.json();
           const results = body.files.map((entry) => {
             const known = [...files.values()].find((stored) => stored.sha256 === entry.sha256);
             if (known === undefined) return { path: entry.path, status: "missing", current: null };
-            const stored = { ...known, updatedAt: new Date() };
+            const stored = { ...known, updatedAt: new Date(), private: entry.private ?? files.get(entry.path)?.private === true };
             files.set(entry.path, stored);
             return { ...describe(entry.path, stored), status: "linked" };
           });
@@ -164,7 +185,7 @@ export const startStub = (options: StubOptions = {}) => {
           const bytes = new Uint8Array(await request.arrayBuffer());
           const declared = request.headers.get("x-sha256");
           if (declared !== sha(bytes)) return problem("sha256_mismatch", "Bytes do not match.", 400);
-          const stored = { bytes, sha256: declared, updatedAt: new Date() };
+          const stored = { bytes, sha256: declared, updatedAt: new Date(), private: visibility(request.headers.get("x-agentfs-private"), files.get(path)) };
           files.set(path, stored);
           return reply({ ...describe(path, stored), status: "uploaded" });
         }
@@ -178,7 +199,8 @@ export const startStub = (options: StubOptions = {}) => {
               "content-type": "application/octet-stream",
               etag: `"${stored.sha256}"`,
               "last-modified": stored.updatedAt.toUTCString(),
-              "x-agentfs-url": linkOf(path),
+              "x-agentfs-private": String(stored.private === true),
+              ...(stored.private === true ? {} : { "x-agentfs-url": linkOf(path) }),
             },
           });
         }
@@ -222,7 +244,7 @@ export const startStub = (options: StubOptions = {}) => {
       if (parts !== null && request.method === "POST" && parts[3] === "complete") {
         const upload = uploads.get(parts[1] ?? "");
         if (upload === undefined) return problem("upload_failed", "No such upload.", 409);
-        const body: { path: string; sha256: string; parts: { partNumber: number; etag: string }[] } = await request.json();
+        const body: { path: string; sha256: string; private?: boolean; parts: { partNumber: number; etag: string }[] } = await request.json();
         const chunks = body.parts.map((part) => upload.parts.get(part.partNumber) ?? new Uint8Array(0));
         const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0));
         let offset = 0;
@@ -231,7 +253,7 @@ export const startStub = (options: StubOptions = {}) => {
           offset += chunk.byteLength;
         }
         if (sha(bytes) !== body.sha256) return problem("upload_incomplete", "Bytes do not match.", 400);
-        const stored = { bytes, sha256: body.sha256, updatedAt: new Date() };
+        const stored = { bytes, sha256: body.sha256, updatedAt: new Date(), private: body.private ?? files.get(body.path)?.private === true };
         files.set(body.path, stored);
         return reply({ ...describe(body.path, stored), verified: false, status: "uploaded" });
       }

@@ -33,6 +33,8 @@ const USAGE = `agentfs ${version}: upload files and get links
 
   agentfs put <file or folder>... [--to folder]  upload; unchanged and known bytes are not sent
               [--force] [--ttl 1d]               --force overwrites a file changed remotely; --ttl deletes the files after that long
+              [--private | --public]             --private gives no public link; a private file stays private until --public
+  agentfs sign <path> [--ttl 5m]                 a link that opens a file without a key, for 5 minutes by default and at most 1h
   agentfs pull <folder> [into]                   download; unchanged files are skipped
   agentfs ls [folder] [-r] [--by agent]          list one level, folders first; -r lists everything below
             [--search text]                      files below the folder whose path has the text, any case
@@ -99,6 +101,7 @@ const RENAMED = new Map([
 
 const MIN_ARGS = new Map([
   ["put", 1],
+  ["sign", 1],
   ["pull", 1],
   ["ls", 0],
   ["stat", 1],
@@ -143,6 +146,8 @@ const OPTIONS = {
     "if-version": { type: "string" },
     "create-only": { type: "boolean", default: false },
     ttl: { type: "string" },
+    private: { type: "boolean", default: false },
+    public: { type: "boolean", default: false },
     prefix: { type: "string", default: "" },
     search: { type: "string" },
     read: { type: "boolean", default: false },
@@ -198,9 +203,17 @@ const summarize = (started: number, outcomes: { kind: string }[]) => {
   else if (counts.has("conflict")) process.exitCode = 3;
 };
 
+const linkOf = (file: RemoteFile) => file.url ?? "private";
+
+const hiddenOf = () => {
+  if (values.private && values.public) throw new UsageError("use --private or --public, not both");
+  if (values.private) return true;
+  return values.public ? false : undefined;
+};
+
 const printFile = (file: RemoteFile) => {
   const by = [file.agent ?? "-", file.commit ?? "-"].join("\t");
-  if (!json) return print(`${file.path}\t${formatBytes(file.size)}\t${by}\t${file.url}`);
+  if (!json) return print(`${file.path}\t${formatBytes(file.size)}\t${by}\t${linkOf(file)}`);
   print(JSON.stringify(brief ? { path: file.path, size: file.size, url: file.url } : file));
 };
 
@@ -317,6 +330,7 @@ const upload = async (api: Api, args: string[], to: string, ttlSeconds: number |
     includeSecrets: values["include-secrets"],
     force: values.force,
     ttlSeconds,
+    private: hiddenOf(),
   });
   if (skipped.length > 0) {
     process.stderr.write(
@@ -329,7 +343,7 @@ const upload = async (api: Api, args: string[], to: string, ttlSeconds: number |
       process.stderr.write(
         `conflict: ${outcome.path}: changed remotely while uploading, not uploaded. Add --force to overwrite.\n`,
       );
-    } else if (!json) print(outcome.file.url);
+    } else if (!json) print(outcome.file.url ?? `${outcome.file.path} (private, no public link)`);
     else {
       const { path, url } = outcome.file;
       print(JSON.stringify({ ...(brief ? { path, url } : outcome.file), status: outcome.kind }));
@@ -425,7 +439,8 @@ const commands = {
     print(`agent     ${file.agent ?? "-"}`);
     print(`session   ${file.session ?? "-"}`);
     print(`commit    ${file.commit ?? "-"}`);
-    print(`link      ${file.url}`);
+    print(`private   ${file.private}`);
+    print(`link      ${file.url ?? "none, the file is private"}`);
   },
   mv: async (api: Api, [from = "", to = ""]: string[]) => {
     const asFolder = await isFolder(api, from);
@@ -573,7 +588,11 @@ const commands = {
   },
   undelete: async (api: Api, [path = ""]: string[]) => {
     const file = await api.undelete(path);
-    print(json ? JSON.stringify(file) : file.url);
+    print(json ? JSON.stringify(file) : linkOf(file));
+  },
+  sign: async (api: Api, [path = ""]: string[]) => {
+    const link = await api.sign(path, ttlOf());
+    print(json ? JSON.stringify(link) : link.url);
   },
   usage: async (api: Api) => {
     const by = values.by === "" ? "agent" : values.by;

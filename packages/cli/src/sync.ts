@@ -150,7 +150,7 @@ export const syncOnce = async (api: Api, dir: string, prefix: string): Promise<C
       return;
     }
     try {
-      await place(dir, join(dir, sidecarOf(path)), await fetchVerified(remote));
+      await place(dir, join(dir, sidecarOf(path)), await fetchVerified(api, remote));
       state.conflicts[path] = { remote: remote.sha256, local };
       changes.push({ kind: "conflict", path, copy: sidecarOf(path) });
     } catch (error) {
@@ -165,7 +165,7 @@ export const syncOnce = async (api: Api, dir: string, prefix: string): Promise<C
       if ((await sha256Of(join(dir, path)).catch(() => null)) !== localSha(path)) {
         throw new Error("changed locally while syncing; the next pass will retry");
       }
-      await place(dir, join(dir, path), await fetchVerified(remote));
+      await place(dir, join(dir, path), await fetchVerified(api, remote));
       state.files[path] = remote.sha256;
       await settle(path);
       changes.push({ kind: "pulled", path });
@@ -210,7 +210,7 @@ export const syncOnce = async (api: Api, dir: string, prefix: string): Promise<C
           return;
         }
         if (await exists(join(dir, path))) throw new Error("recreated locally while syncing; the next pass will decide");
-        await place(dir, join(dir, path), await fetchVerified(remote));
+        await place(dir, join(dir, path), await fetchVerified(api, remote));
         state.files[path] = remote.sha256;
         changes.push({ kind: "pulled", path });
       } catch (pullError) {

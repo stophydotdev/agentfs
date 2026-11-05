@@ -8,8 +8,9 @@ export type PullOutcome =
   | { kind: "downloaded" | "unchanged"; path: string; target: string; size: number }
   | { kind: "failed"; path: string; reason: string };
 
-export const fetchVerified = async (file: RemoteFile) => {
-  const response = await fetch(file.url, { headers: clientHeaders() });
+export const fetchVerified = async (api: Api, file: RemoteFile) => {
+  const response =
+    file.url === null ? await api.content(file.path) : await fetch(file.url, { headers: clientHeaders() });
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (createHash("sha256").update(bytes).digest("hex") !== file.sha256) {
@@ -30,7 +31,7 @@ export const pull = async (api: Api, folder: string, into: string) => {
       if ((await sha256Of(target).catch(() => null)) === file.sha256) {
         return { kind: "unchanged", path: file.path, target, size: file.size };
       }
-      const bytes = await fetchVerified(file);
+      const bytes = await fetchVerified(api, file);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, bytes);
       return { kind: "downloaded", path: file.path, target, size: file.size };
