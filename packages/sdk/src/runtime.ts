@@ -40,13 +40,20 @@ export const openKeyFile = async () => {
     if (!hasFiles(files) || typeof home.homedir !== "function") return null;
     const directory = `${readEnv("XDG_CONFIG_HOME") ?? `${home.homedir()}/.config`}/${CONFIG_DIR_NAME}`;
     const path = `${directory}/${KEY_FILE_NAME}`;
+    const legacyPath = `${directory}/credentials.json`;
     return {
       path,
+      legacyPath,
       read: async () => {
         const saved = await files.readFile(path, "utf8").catch(() => null);
         const key = saved?.trim() ?? "";
         return key === "" ? null : key;
       },
+      hasLegacyLogin: () =>
+        files.readFile(legacyPath, "utf8").then(
+          () => true,
+          () => false,
+        ),
       write: async (key: string) => {
         await files.mkdir(directory, { recursive: true });
         await files.writeFile(path, key, { mode: 0o600 });

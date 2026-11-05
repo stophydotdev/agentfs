@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { version } from "../package.json";
@@ -330,6 +330,18 @@ describe("opening", () => {
       expect((await AgentFS.open()).key).toBe(process.env.AGENTFS_KEY);
       expect((await AgentFS.open({ key: KEY })).key).toBe(KEY);
       expect((await AgentFS.open({ key: KEY })).url).toBe(stub.url);
+    });
+  });
+
+  test("a 0.0.2 login and no key stops instead of signing up a new empty account", async () => {
+    const config = await mkdtemp(join(tmpdir(), "agentfs-sdk-"));
+    await mkdir(join(config, "agentfs"), { recursive: true });
+    await writeFile(join(config, "agentfs", "credentials.json"), "{}");
+    await withEnv({ AGENTFS_KEY: undefined, AGENTFS_URL: stub.url, XDG_CONFIG_HOME: config }, async () => {
+      stub.seen.signups = 0;
+      const error = await caught(AgentFS.open());
+      expect(error.message).toContain(`found a 0.0.2 login in ${join(config, "agentfs", "credentials.json")}`);
+      expect(stub.seen.signups).toBe(0);
     });
   });
 

@@ -41,6 +41,12 @@ const resolveKey = async (given: string | undefined, url: string) => {
   const file = await openKeyFile();
   const saved = file === null ? null : await file.read();
   if (saved !== null) return saved;
+  if (file !== null && (await file.hasLegacyLogin())) {
+    throw new AgentFSError({
+      code: "EPERM",
+      message: `EPERM: found a 0.0.2 login in ${file.legacyPath}, which this version does not read, and no key. Signing up now would start a new empty account. Get a key for that account from the API keys page of the dashboard on https://agentfs.cloud, then set AGENTFS_KEY or pass { key }.`,
+    });
+  }
   const key = await signUp(url);
   await file?.write(key);
   return key;
