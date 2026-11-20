@@ -1,6 +1,6 @@
 {
   "name": "@agentfs/cli",
-  "version": "0.0.2",
+  "version": "1.0.0",
   "description": "Cloud storage for AI agents from the terminal. Upload a file, get a link.",
   "license": "MIT",
   "homepage": "https://agentfs.cloud",
@@ -25,7 +25,7 @@
   },
   "scripts": {
     "dev": "bun src/index.ts",
-    "build": "rm -rf dist && bun build src/index.ts --target node --minify --outfile dist/agentfs.js && chmod +x dist/agentfs.js && mkdir -p dist/skills && cp -R ../../skills/. dist/skills/",
+    "build": "rm -rf dist && bun build src/index.ts --target node --minify --banner '#!/usr/bin/env node' --outfile dist/agentfs.js && chmod +x dist/agentfs.js && mkdir -p dist/skills && cp -R ../../skills/. dist/skills/",
     "check-types": "tsc --noEmit",
     "test": "bun test",
     "prepack": "bun run build"

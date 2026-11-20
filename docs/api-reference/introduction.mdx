@@ -1,0 +1,64 @@
+---
+title: "HTTP API"
+description: "Conventions for every endpoint: keys, request ids, conditional writes, idempotency and paging."
+---
+
+The endpoint pages in this tab come from the server's OpenAPI document, `GET /openapi.json`. This page covers what every endpoint shares.
+
+```bash
+export AGENTFS=https://agentfs.cloud
+export KEY=$(curl -s -X POST $AGENTFS/v1/signup | jq -r .key)
+```
+
+## Keys
+
+`POST /v1/signup` needs nothing and returns a key. One address can sign up 10 times a minute. Send the key as `Authorization: Bearer $KEY` on every other call. Links need no key.
+
+A scoped key reaches only paths and kv keys under its folder, and only for the permissions it was made with. Account-wide actions need the full key and return 403 `key_scope` otherwise. See [Keys and sharing](/guides/keys-and-sharing).
+
+## Errors and request ids
+
+Every response has an `x-request-id` header. Every error is `{ "error": { "code", "message", "retryAfter", "requestId" } }`. See [Errors](/reference/errors).
+
+## Conditional writes
+
+`PUT /v1/files/{path}` and `POST /v1/uploads/{upload}/{uploadId}/complete` take two headers:
+
+- `If-Match: "<sha256>"` writes only if the file exists with that sha256.
+- `If-None-Match: *` writes only if no file is there.
+
+When the check fails, nothing is written and the answer is 412 `precondition_failed`. For an upload in parts, the check runs at complete. Entries of `POST /v1/files` take `ifMatch` and `ifNoneMatch: true` instead, and a failed entry gets the status `conflict`.
+
+`DELETE /v1/files/{path}` takes `If-Match: "<sha256>"` too. It deletes only if the file has that sha256. Otherwise the answer is 412 and nothing is deleted.
+
+`PUT /v1/kv/{key}` takes `If-Match: "<version>"` and `If-None-Match: *`. `DELETE /v1/kv/{key}` takes `If-Match`.
+
+## Idempotency
+
+Every POST, PUT and DELETE takes an `Idempotency-Key` of 1 to 128 characters. The same key with the same request within 24 hours returns the first response with `idempotent-replay: true`. See [Reliability](/guides/reliability).
+
+## Expiry
+
+Send `x-agentfs-ttl: <seconds>` on `PUT /v1/files/{path}`, `POST /v1/uploads` and `PUT /v1/kv/{key}`, or `ttlSeconds` on an entry of `POST /v1/files`. The file or value gets an `expiresAt` and is deleted after it.
+
+## File details
+
+`HEAD /v1/files/{path}` has no body. It answers with `content-length`, `content-type`, `etag` (the sha256 in quotes), `last-modified` and `x-agentfs-url`. The headers `x-agentfs-agent`, `x-agentfs-session`, `x-agentfs-commit` and `x-agentfs-expires-at` appear when they are set. `x-agentfs-verified` is `true` when agentfs hashed the bytes itself, and `false` for a direct upload, where the sha256 is the one the client declared.
+
+## Who wrote it
+
+Send `x-agentfs-agent`, `x-agentfs-session` and `x-agentfs-commit` with any write. Lists and details show them, and every write records an event with them.
+
+## Paging
+
+A list answer has a `cursor`. When it is not null, send it back as `?cursor=` for the next page. A page of files holds 1000.
+
+`GET /v1/events` is newest first. With `after=<id>` it returns only newer events, oldest first, and waits up to `wait` seconds (0 to 30) when there are none.
+
+## Links
+
+Use the `url` the API returns for a file. Links may be served from a different host than the API, and every link response has an `x-agentfs-report` header that points at the report endpoint. Links answer `Range` requests and send the sha256 as the `ETag`.
+
+## Big files
+
+Big files use a direct upload. `maxFileBytes` is the biggest file your plan takes, not the size where uploads switch to parts. See [Big files](/guides/big-files) and [Limits](/reference/limits).

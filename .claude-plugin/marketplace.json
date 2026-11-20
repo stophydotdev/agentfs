@@ -1,0 +1,15 @@
+{
+  "name": "agentfs",
+  "description": "Cloud storage for AI agents. Upload files, get links anyone can open.",
+  "owner": {
+    "name": "AgentFS",
+    "url": "https://agentfs.cloud"
+  },
+  "plugins": [
+    {
+      "name": "agentfs",
+      "source": "./",
+      "description": "Upload files and folders from your agent and get a link for each one."
+    }
+  ]
+}

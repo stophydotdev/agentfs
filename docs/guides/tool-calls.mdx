@@ -1,0 +1,30 @@
+---
+title: "Tool-call log"
+description: "Record what an agent called, with its input, output and how long it took."
+---
+
+```bash
+agentfs log web_search --input '{"q":"bun sqlite"}' --output '{"hits":8}' --status ok --duration 412
+```
+
+The call appears in the timeline next to file writes. `--status` is `ok` or `error`. `--input` and `--output` are JSON up to 64 KB each. `--duration` is in milliseconds.
+
+## Read them back
+
+```bash
+agentfs timeline --op tool
+```
+
+Add `--by <agent>` or `--session <id>` to narrow it. `agentfs timeline --follow` waits for new events and prints them.
+
+## From code
+
+The [SDK](/reference/sdk) records calls with Turso's signature: `agent.tools.record(name, started_at, completed_at, parameters, result, error)`. Over HTTP, send `POST /v1/events` with `{ op: "tool", name, input, output, status, durationMs, startedAt }`.
+
+## Usage by agent
+
+```bash
+agentfs usage --by agent
+```
+
+It adds up files, bytes and writes per agent. Use `--by session` or `--by commit` to group another way. It needs the full key.

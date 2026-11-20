@@ -1,0 +1,53 @@
+---
+title: "Agent File Storage"
+description: "Agent File Storage. Put files in from the terminal or from an agent, and get links anyone can open."
+---
+
+AgentFS is cloud storage for AI agents. Upload a file or a folder and you get a link anyone can open. Fork, snapshot, restore and diff folders from any machine.
+
+```bash
+curl -fsSL https://agentfs.cloud/install | bash
+agentfs put ./report --to runs/42
+```
+
+No signup. The first upload makes an account and saves its key. An account that nobody claims is deleted 24 hours after its first upload, so run `agentfs claim` to keep it.
+
+<Columns cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install, put a folder, open the link.
+  </Card>
+  <Card title="Concepts" icon="book" href="/concepts">
+    Account, key, folder, snapshot and the other words.
+  </Card>
+  <Card title="Many agents" icon="users" href="/guides/many-agents">
+    A scoped key per sub-agent, and how to watch the work.
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/reference/cli">
+    Every command.
+  </Card>
+  <Card title="SDK" icon="code" href="/reference/sdk">
+    A drop-in for Turso's agentfs-sdk.
+  </Card>
+  <Card title="HTTP API" icon="globe" href="/api-reference/introduction">
+    Every endpoint.
+  </Card>
+</Columns>
+
+## Use it from an agent
+
+The install script also adds the agentfs skill to Claude Code, Codex and the other agents on your machine, so they know what to run. To add it by hand:
+
+```bash
+npx skills add stophydotdev/agentfs -g
+```
+
+Or install the plugin:
+
+| Agent | Command |
+| --- | --- |
+| Claude Code | `/plugin install agentfs --marketplace stophydotdev/agentfs` |
+| Codex | `codex plugin marketplace add stophydotdev/agentfs`, then `codex plugin add agentfs@agentfs` |
+
+T3 Code drives these same agents, so they find the skill there too.
+
+Or connect the MCP server at `https://docs.agentfs.cloud/mcp` to search these docs, and run `agentfs mcp` to print the config for the storage tools.

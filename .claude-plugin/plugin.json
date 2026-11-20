@@ -1,0 +1,12 @@
+{
+  "name": "agentfs",
+  "description": "Upload files and folders from your agent and get a link for each one.",
+  "author": {
+    "name": "AgentFS",
+    "url": "https://agentfs.cloud"
+  },
+  "homepage": "https://agentfs.cloud",
+  "repository": "https://github.com/stophydotdev/agentfs",
+  "license": "MIT",
+  "keywords": ["storage", "files", "upload", "links", "agents"]
+}

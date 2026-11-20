@@ -1,310 +1,333 @@
-import type { z } from "zod";
+import type { Bytes } from "./bytes.js";
+import { SDK_VERSION } from "./config.js";
+import { AgentFSError, fromProblem } from "./errors.js";
+import { segments } from "./paths.js";
+import { inBrowser } from "./runtime.js";
+import {
+  type FileInfo,
+  type Json,
+  readDiff,
+  readEvents,
+  readFile,
+  readKey,
+  readKvItem,
+  readKvPage,
+  readLinkStatus,
+  readLimits,
+  readListing,
+  readPartUrls,
+  readProblem,
+  readRestored,
+  readSignedLink,
+  readSnapshot,
+  readStarted,
+  readToolEvent,
+} from "./wire.js";
 
-import { BlobError, errorFromResponse, needsDirectUpload } from "./errors";
-import { defaultRetryPolicy, ExpiredUrlError, withRetry, type RetryPolicy } from "./retry";
-import { fileSchema, partUrlsSchema, uploadSessionSchema, type StoredFile, type UploadSession } from "./schemas";
+const PART_WORKERS = 4;
+const IDENTITY: Record<string, string> = inBrowser() ? {} : { "user-agent": `agentfs-sdk/${SDK_VERSION}` };
 
-export const DIRECT_THRESHOLD = 1024 * 1024;
-const PART_URL_BATCH = 100;
-const COMPLETE_POLLS = 40;
-const COMPLETE_POLL_MAX_MS = 1000;
+export type Headed =
+  | { kind: "file"; file: FileInfo }
+  | { kind: "missing"; requestId: string | null };
 
-export interface ClientOptions {
-  readonly token: string;
-  readonly baseUrl?: string;
-  readonly fetch?: typeof fetch;
-  readonly retry?: Partial<RetryPolicy>;
-  readonly concurrency?: number;
-  readonly headers?: Record<string, string>;
-}
+type Init = { method?: string; body?: BodyInit; headers?: Record<string, string> };
 
-export type Source = Blob | { readonly stream: ReadableStream<Uint8Array>; readonly size: number };
+/** `private: true` gives a file no public link, `false` makes it public, and leaving it out keeps what the file has. */
+export type Visibility = { private?: boolean };
+type ByteRange = { start: number; end: number };
 
-export type Visibility = "public" | "unlisted" | "private";
+const visibilityHeader = ({ private: hidden }: Visibility): Record<string, string> =>
+  hidden === undefined ? {} : { "x-agentfs-private": String(hidden) };
 
-export interface WriteOptions {
-  readonly contentType?: string;
-  readonly visibility?: Visibility;
-  readonly expiresIn?: string;
-  readonly label?: string;
-  readonly cache?: string;
-  readonly metadata?: Record<string, string>;
-  readonly signal?: AbortSignal;
-  readonly onProgress?: (uploaded: number, total: number) => void;
-}
+const rangeHeader = (range: ByteRange | undefined): Record<string, string> =>
+  range === undefined ? {} : { range: `bytes=${range.start}-${range.end}` };
 
-export interface PutConditions {
-  readonly ifNoneMatch?: boolean;
-  readonly ifMatch?: string;
-}
-
-export interface SessionOptions {
-  readonly multipart: boolean;
-  readonly ifExists: "error" | "replace";
-  readonly ifMatch?: string;
-}
-
-type Init = RequestInit & { readonly headers?: Record<string, string>; readonly idempotent?: boolean };
-
-const RETRIED_METHODS = new Set(["GET", "HEAD", "PUT", "DELETE"]);
-type Bytes = Blob | Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array>;
-
-export const encodePath = (path: string): string => path.split("/").map(encodeURIComponent).join("/");
-
-export const checkPath = (path: string): string => {
-  if (typeof path !== "string" || path.length === 0) throw new TypeError("path must be a non-empty string");
-  if (path.split("/").some((segment) => segment === "." || segment === "..")) throw new TypeError(`path may not contain "." or ".." segments: ${path}`);
-  return path;
+const bytesOf = async (response: Response, range: ByteRange | undefined) => {
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (range === undefined || response.status === 206) return bytes;
+  return bytes.slice(range.start, range.end + 1);
 };
 
-const bodyInit = (body: Bytes): RequestInit => {
-  if (!(body instanceof ReadableStream)) return { body };
-  const init = { body, duplex: "half" };
-  return init;
-};
-
-const chunker = (stream: ReadableStream<Uint8Array>, declared: number) => {
-  const reader = stream.getReader();
-  let leftover: Uint8Array = new Uint8Array(0);
-  let read = 0;
-  const longer = () => new BlobError("invalid_input", { message: `body is longer than the declared ${declared} bytes` });
-  return {
-    take: async (length: number): Promise<Uint8Array<ArrayBuffer>> => {
-      const out = new Uint8Array(length);
-      let filled = 0;
-      while (filled < length) {
-        if (leftover.byteLength === 0) {
-          const { done, value } = await reader.read();
-          if (done) throw new BlobError("invalid_input", { message: `body was ${read + filled} bytes, ${declared} were declared` });
-          leftover = value;
-          continue;
-        }
-        const take = Math.min(leftover.byteLength, length - filled);
-        out.set(leftover.subarray(0, take), filled);
-        filled += take;
-        leftover = leftover.subarray(take);
-      }
-      read += length;
-      return out;
-    },
-    finish: async (): Promise<void> => {
-      if (leftover.byteLength) throw longer();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) return;
-        if (value.byteLength) throw longer();
-      }
-    },
-    cancel: (reason: unknown) => reader.cancel(reason).catch(() => undefined),
-  };
-};
-
-const writeFields = (write: WriteOptions): Record<string, string> => {
-  const fields: Record<string, string> = {};
-  if (write.cache) fields.cache = write.cache;
-  if (write.visibility) fields.visibility = write.visibility;
-  if (write.expiresIn) fields.expires_in = write.expiresIn;
-  if (write.label) fields.label = write.label;
-  return fields;
-};
-
-export const createClient = (options: ClientOptions) => {
-  const baseUrl = (options.baseUrl ?? "https://agentfs.cloud").replace(/\/+$/, "");
-  const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
-  const policy: RetryPolicy = { ...defaultRetryPolicy, ...options.retry };
-  const concurrency = Math.max(1, options.concurrency ?? 6);
-
-  const send = async (path: string, { idempotent, ...init }: Init = {}): Promise<Response> => {
-    const method = init.method ?? "GET";
-    const attempt = async () => {
-      const response = await fetchImpl(`${baseUrl}${path}`, { ...init, headers: { authorization: `Bearer ${options.token}`, ...options.headers, ...init.headers } });
-      if (init.redirect === "manual" && (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400))) return response;
-      if (!response.ok) throw await errorFromResponse(response, `${method} ${path} failed with ${response.status}.`);
-      return response;
-    };
-    const retried = !(init.body instanceof ReadableStream) && (idempotent ?? RETRIED_METHODS.has(method.toUpperCase()));
-    return retried ? withRetry(attempt, policy, init.signal) : attempt();
-  };
-
-  const download = async (path: string): Promise<{ readonly meta: Headers; readonly content: Response; readonly redirected: boolean }> => {
-    const first = await send(path, { redirect: "manual" });
-    if (first.type === "opaqueredirect") {
-      const followed = await send(path);
-      return { meta: followed.headers, content: followed, redirected: true };
-    }
-    const location = first.headers.get("location");
-    if (first.status < 300 || first.status >= 400 || !location) return { meta: first.headers, content: first, redirected: false };
-    const target = new URL(location, `${baseUrl}${path}`);
-    const headers: Record<string, string> = target.origin === new URL(baseUrl).origin ? { authorization: `Bearer ${options.token}` } : {};
-    const content = await withRetry(async () => {
-      const response = await fetchImpl(target.href, { headers });
-      if (!response.ok) throw await errorFromResponse(response, `GET ${path} failed with ${response.status} at storage.`);
-      return response;
-    }, policy);
-    return { meta: first.headers, content, redirected: true };
-  };
-
-  const json = async <Schema extends z.ZodType>(schema: Schema, path: string, init?: Init): Promise<z.infer<Schema>> =>
-    schema.parse(await (await send(path, init)).json());
-
-  const jsonInit = (method: string, body: object, signal?: AbortSignal): Init => ({
-    method,
-    body: JSON.stringify(body),
-    headers: { "content-type": "application/json" },
-    ...(signal ? { signal } : {}),
+const failure = async (response: Response) => {
+  const requestId = response.headers.get("x-request-id");
+  const problem = readProblem(await response.json().catch(() => null));
+  if (problem !== null) return fromProblem(problem, response.status, requestId);
+  const missing = response.status === 404;
+  return new AgentFSError({
+    code: missing ? "ENOENT" : String(response.status),
+    message: `${missing ? "not_found" : response.status}: ${response.statusText}`,
+    agentfsCode: missing ? "not_found" : null,
+    requestId,
+    status: response.status,
   });
+};
 
-  const retryUnlessStream = <T>(source: Source, task: () => Promise<T>, signal: AbortSignal | undefined): Promise<T> =>
-    source instanceof Blob ? withRetry(task, policy, signal) : task();
+const attempt = async (url: string, init: Init) => {
+  const response = await fetch(url, { ...init, headers: { ...IDENTITY, ...init.headers } });
+  if (!response.ok) throw await failure(response);
+  return response;
+};
 
-  const bytesOf = (source: Source): Blob | ReadableStream<Uint8Array> => (source instanceof Blob ? source : source.stream);
+const withRetry = async (url: string, init: Init) => {
+  try {
+    return await attempt(url, init);
+  } catch (error) {
+    if (!(error instanceof AgentFSError) || error.agentfsCode !== "idempotency_in_progress") throw error;
+    await new Promise((done) => setTimeout(done, (error.retryAfter ?? 1) * 1000));
+    return attempt(url, init);
+  }
+};
 
-  const putFile = async (path: string, source: Source, write: WriteOptions & PutConditions): Promise<StoredFile> => {
-    const query = new URLSearchParams(writeFields(write));
-    if (write.contentType !== undefined) query.set("infer_content_type", "false");
-    if (write.metadata) query.set("metadata", JSON.stringify(write.metadata));
-    const headers: Record<string, string> = { "content-length": String(source.size) };
-    if (write.contentType !== undefined) headers["content-type"] = write.contentType;
-    if (write.ifNoneMatch) headers["if-none-match"] = "*";
-    if (write.ifMatch !== undefined) headers["if-match"] = write.ifMatch;
-    const stored = await json(fileSchema, `/v1/files/${encodePath(path)}?${query}`, { method: "PUT", ...bodyInit(bytesOf(source)), headers, ...(write.signal ? { signal: write.signal } : {}) });
-    write.onProgress?.(source.size, source.size);
-    return stored;
-  };
+export const signUp = async (url: string) =>
+  readKey(await (await withRetry(`${url}/v1/signup`, { method: "POST" })).json());
 
-  const putBytes = async (url: string, bytes: Bytes, length: number, label: string, signal: AbortSignal | undefined, withAuth: boolean): Promise<void> => {
-    const headers: Record<string, string> = withAuth ? { authorization: `Bearer ${options.token}` } : {};
-    if (bytes instanceof ReadableStream) headers["content-length"] = String(length);
-    const response = await fetchImpl(url, { method: "PUT", ...bodyInit(bytes), headers, ...(signal ? { signal } : {}) });
-    if (response.ok) return;
-    if (!withAuth && (response.status === 401 || response.status === 403)) throw new ExpiredUrlError(`Storage rejected ${label} with ${response.status}.`);
-    throw await errorFromResponse(response, `Storage rejected ${label} with ${response.status}.`);
-  };
+const json = (method: string, value: unknown): Init => ({
+  method,
+  body: JSON.stringify(value),
+  headers: { "content-type": "application/json" },
+});
 
-  const sendParts = async (session: UploadSession, source: Source, write: WriteOptions): Promise<void> => {
-    const size = source.size;
-    const sizeOf = (part: number) => Math.min(part * session.part_size, size) - (part - 1) * session.part_size;
-    const done = new Set(session.uploaded_parts.map((part) => part.part_number));
-    let uploaded = [...done].reduce((sum, part) => sum + sizeOf(part), 0);
-    write.onProgress?.(uploaded, size);
-    const batches = new Map<number, Promise<Map<number, string>>>();
-    const partUrl = async (part: number, fresh: boolean): Promise<string> => {
-      const index = Math.floor((part - 1) / PART_URL_BATCH);
-      if (fresh) batches.delete(index);
-      let batch = batches.get(index);
-      if (!batch) {
-        const from = index * PART_URL_BATCH + 1;
-        const to = Math.min(from + PART_URL_BATCH - 1, session.total_parts);
-        batch = json(partUrlsSchema, `/v1/uploads/${session.id}/part-urls?from=${from}&to=${to}`, write.signal ? { signal: write.signal } : {})
-          .then(({ parts }) => new Map(parts.map((entry) => [entry.part_number, entry.url])));
-        batches.set(index, batch);
-        batch.catch(() => batches.delete(index));
-      }
-      const url = (await batch).get(part);
-      if (!url) throw new BlobError("request_failed", { message: `The server sent no URL for part ${part}.`, status: 502, retryable: true });
-      return url;
-    };
-    const sendPart = async (part: number, bytes: Blob | Uint8Array<ArrayBuffer>) => {
-      let fresh = false;
-      await withRetry(async () => {
-        try {
-          if (session.transport === "worker") await putBytes(`${baseUrl}/v1/uploads/${session.id}/parts/${part}`, bytes, sizeOf(part), `part ${part}`, write.signal, true);
-          else await putBytes(await partUrl(part, fresh), bytes, sizeOf(part), `part ${part}`, write.signal, false);
-        } catch (error) {
-          fresh = error instanceof ExpiredUrlError;
-          throw error;
-        }
-      }, policy, write.signal);
-      uploaded += sizeOf(part);
-      write.onProgress?.(uploaded, size);
-    };
-    const parts = Array.from({ length: session.total_parts }, (_, index) => index + 1);
-    if (!(source instanceof Blob)) {
-      const chunks = chunker(source.stream, size);
-      try {
-        for (const part of parts) {
-          const bytes = await chunks.take(sizeOf(part));
-          if (!done.has(part)) await sendPart(part, bytes);
-        }
-        await chunks.finish();
-      } catch (error) {
-        await chunks.cancel(error);
+export class Client {
+  constructor(
+    readonly url: string,
+    readonly key: string,
+    private readonly agent: string | undefined = undefined,
+  ) {}
+
+  private send(path: string, init: Init = {}) {
+    const method = init.method ?? "GET";
+    const mutates = method !== "GET" && method !== "HEAD";
+    return withRetry(`${this.url}${path}`, {
+      ...init,
+      headers: {
+        authorization: `Bearer ${this.key}`,
+        ...(mutates ? { "idempotency-key": crypto.randomUUID() } : {}),
+        ...(mutates && this.agent !== undefined ? { "x-agentfs-agent": this.agent } : {}),
+        ...init.headers,
+      },
+    });
+  }
+
+  private async read(path: string, init: Init = {}): Promise<unknown> {
+    return (await this.send(path, init)).json();
+  }
+
+  async head(path: string): Promise<Headed> {
+    const response = await this.send(`/v1/files/${segments(path)}`, { method: "HEAD" }).catch(
+      (error: unknown) => {
+        if (error instanceof AgentFSError && error.agentfsCode === "not_found") return error;
         throw error;
-      }
-      return;
+      },
+    );
+    if (response instanceof AgentFSError) return { kind: "missing", requestId: response.requestId };
+    const header = (name: string) => response.headers.get(name);
+    const lastModified = header("last-modified");
+    const url = header("x-agentfs-url");
+    const hidden = header("x-agentfs-private") === "true";
+    const etag = header("etag");
+    const size = Number(header("content-length"));
+    if (lastModified === null || (url === null && !hidden) || etag === null || !Number.isFinite(size)) {
+      throw new AgentFSError({ code: "bad_response", message: "bad_response: HEAD answer is missing headers." });
     }
-    const pending = parts.filter((part) => !done.has(part));
-    let next = 0;
+    return {
+      kind: "file",
+      file: {
+        path,
+        size,
+        sha256: etag.replaceAll('"', ""),
+        contentType: header("content-type") ?? "application/octet-stream",
+        updatedAt: new Date(lastModified).toISOString(),
+        url,
+        private: hidden,
+      },
+    };
+  }
+
+  page(prefix: string, delimiter: string, cursor: string) {
+    const query = new URLSearchParams({ prefix, cursor, ...(delimiter === "" ? {} : { delimiter }) });
+    return this.read(`/v1/files?${query}`).then(readListing);
+  }
+
+  async list(prefix: string, delimiter: string) {
+    const files: FileInfo[] = [];
+    const folders: string[] = [];
+    let cursor = "";
+    do {
+      const next = await this.page(prefix, delimiter, cursor);
+      files.push(...next.files);
+      folders.push(...next.folders);
+      cursor = next.cursor ?? "";
+    } while (cursor !== "");
+    return { files, folders };
+  }
+
+  async put(path: string, body: Bytes, sha256: string, options: Visibility = {}) {
+    return readFile(
+      await this.read(`/v1/files/${segments(path)}`, {
+        method: "PUT",
+        body,
+        headers: { "x-sha256": sha256, ...visibilityHeader(options) },
+      }),
+    );
+  }
+
+  async remove(path: string) {
+    await this.send(`/v1/files/${segments(path)}`, { method: "DELETE" });
+  }
+
+  async removeFolder(prefix: string) {
+    await this.send(`/v1/files?${new URLSearchParams({ prefix })}`, { method: "DELETE" });
+  }
+
+  async move(from: string, to: string) {
+    await this.send("/v1/files/move", json("POST", { from, to }));
+  }
+
+  async link(files: ({ path: string; sha256: string; size: number } & Visibility)[]) {
+    return readLinkStatus(await this.read("/v1/files", json("POST", { files })));
+  }
+
+  async limits() {
+    return readLimits(await this.read("/v1/limits"));
+  }
+
+  async bytesAt(url: string, range?: ByteRange): Promise<Uint8Array> {
+    return bytesOf(await attempt(url, { headers: rangeHeader(range) }), range);
+  }
+
+  /** Reads a file's bytes with the key, which is the only way to read a private file without a signed link. */
+  async contentAt(path: string, range?: ByteRange): Promise<Uint8Array> {
+    const response = await this.send(`/v1/content/${segments(path)}`, { headers: rangeHeader(range) });
+    return bytesOf(response, range);
+  }
+
+  async sign(path: string, ttlSeconds: number | undefined) {
+    return readSignedLink(await this.read("/v1/files/sign", json("POST", { path, ttlSeconds })));
+  }
+
+  async uploadDirect(path: string, body: Bytes, sha256: string, options: Visibility = {}) {
+    const started = readStarted(
+      await this.read("/v1/uploads", json("POST", { path, sha256, size: body.byteLength, direct: true })),
+    );
+    const base = `/v1/uploads/${started.upload}/${encodeURIComponent(started.uploadId)}`;
+    const partCount = Math.ceil(body.byteLength / started.partBytes);
+    const urls = new Map(started.partUrls.map((url, index) => [index + 1, url]));
+    let refill: Promise<void> | null = null;
+    const fetchUrls = async (from: number) => {
+      const page = readPartUrls(
+        await this.read(`${base}/parts?${new URLSearchParams({ from: String(from) })}`),
+      );
+      page.partUrls.forEach((url, index) => urls.set(page.from + index, url));
+    };
+    const urlFor = async (number: number) => {
+      for (let tries = 0; !urls.has(number); tries += 1) {
+        if (tries > partCount) {
+          throw new AgentFSError({ code: "bad_response", message: `bad_response: no URL for part ${number}.` });
+        }
+        refill ??= fetchUrls(number).finally(() => {
+          refill = null;
+        });
+        await refill;
+      }
+      return urls.get(number) ?? "";
+    };
+    const parts: { partNumber: number; etag: string }[] = [];
+    let next = 1;
     const worker = async () => {
-      for (let part = pending[next++]; part !== undefined; part = pending[next++]) {
-        const start = (part - 1) * session.part_size;
-        await sendPart(part, source.slice(start, start + sizeOf(part)));
+      while (next <= partCount) {
+        const number = next;
+        next += 1;
+        const start = (number - 1) * started.partBytes;
+        const slice = body.subarray(start, Math.min(start + started.partBytes, body.byteLength));
+        const response = await attempt(await urlFor(number), { method: "PUT", body: slice });
+        const etag = response.headers.get("etag");
+        if (etag === null) {
+          throw new AgentFSError({ code: "bad_response", message: "bad_response: storage sent no ETag." });
+        }
+        parts.push({ partNumber: number, etag });
       }
     };
-    await Promise.all(Array.from({ length: Math.min(concurrency, pending.length) }, worker));
-  };
-
-  const sendWhole = async (session: UploadSession, source: Source, write: WriteOptions): Promise<void> => {
-    let url = session.upload_url;
-    await retryUnlessStream(source, async () => {
-      if (!url) url = (await json(uploadSessionSchema, `/v1/uploads/${session.id}`)).upload_url;
-      if (!url) throw new BlobError("request_failed", { message: `Upload ${session.id} has no upload URL.`, status: 409 });
-      try {
-        await putBytes(url, bytesOf(source), source.size, "the file", write.signal, false);
-      } catch (error) {
-        if (error instanceof ExpiredUrlError) url = undefined;
-        throw error;
-      }
-    }, write.signal);
-    write.onProgress?.(source.size, source.size);
-  };
-
-  const complete = async (id: string, signal: AbortSignal | undefined): Promise<StoredFile> => {
-    for (let attempt = 0; attempt < COMPLETE_POLLS; attempt += 1) {
-      const response = await withRetry(() => send(`/v1/uploads/${id}/complete`, { method: "POST", ...(signal ? { signal } : {}) }), policy, signal);
-      if (response.status === 200) return fileSchema.parse(await response.json());
-      await policy.sleep(Math.min(COMPLETE_POLL_MAX_MS, 100 * 2 ** attempt));
-    }
-    throw new BlobError("not_ready", { message: `Upload ${id} is still finishing. Check it later with info().`, status: 504, retryable: true });
-  };
-
-  const upload = async (path: string, source: Source, write: WriteOptions & SessionOptions): Promise<StoredFile> => {
-    const created = await withRetry(() => json(uploadSessionSchema, "/v1/uploads", jsonInit("POST", {
-      path: encodePath(path),
-      size_bytes: source.size,
-      multipart: write.multipart,
-      if_exists: write.ifExists,
-      ...(write.ifMatch === undefined ? {} : { if_match: write.ifMatch }),
-      ...(write.contentType === undefined ? {} : { content_type: write.contentType, infer_content_type: false }),
-      ...writeFields(write),
-      metadata: write.metadata,
-    }, write.signal)), policy, write.signal);
     try {
-      if (created.upload_url) await sendWhole(created, source, write);
-      else await sendParts(created, source, write);
+      await Promise.all(Array.from({ length: Math.min(PART_WORKERS, partCount) }, worker));
+      parts.sort((a, b) => a.partNumber - b.partNumber);
+      return readFile(await this.read(`${base}/complete`, json("POST", { path, sha256, parts, private: options.private })));
     } catch (error) {
-      if (!(source instanceof Blob)) await source.stream.cancel(error).catch(() => undefined);
-      if (!(error instanceof BlobError) || !error.retryable || !(source instanceof Blob)) await send(`/v1/uploads/${created.id}`, { method: "DELETE" }).catch(() => undefined);
+      await this.send(base, { method: "DELETE" }).catch(() => null);
       throw error;
     }
-    return complete(created.id, write.signal);
-  };
+  }
 
-  const store = async (path: string, source: Source, write: WriteOptions & SessionOptions): Promise<StoredFile> => {
-    if (source.size === 0 || (!write.multipart && source.size <= DIRECT_THRESHOLD)) {
-      try {
-        return await putFile(path, source, {
-          ...write,
-          ...(write.ifExists === "error" ? { ifNoneMatch: true } : {}),
-        });
-      } catch (error) {
-        if (!(source instanceof Blob) || source.size === 0 || !needsDirectUpload(error)) throw error;
-      }
-    }
-    return upload(path, source, write);
-  };
+  async snapshot(name: string, prefix: string) {
+    return readSnapshot(await this.read("/v1/snapshots", json("POST", { name, prefix })));
+  }
 
-  return { send, download, json, jsonInit, putFile, upload, store, complete, policy };
-};
+  async restore(name: string) {
+    return readRestored(
+      await this.read(`/v1/snapshots/${encodeURIComponent(name)}/restore`, json("POST", {})),
+    );
+  }
 
-export type Client = ReturnType<typeof createClient>;
+  async diff(from: string, to: string | undefined) {
+    const query = new URLSearchParams({ from, ...(to === undefined ? {} : { to }) });
+    return readDiff(await this.read(`/v1/diff?${query}`));
+  }
+
+  async kvGet<T>(key: string): Promise<{ item: ReturnType<typeof readKvItem>; value: T } | null> {
+    const response = await this.send(`/v1/kv/${segments(key)}`).catch((error: unknown) => {
+      if (error instanceof AgentFSError && error.agentfsCode === "not_found") return null;
+      throw error;
+    });
+    if (response === null) return null;
+    const body = await response.text();
+    const item = readKvItem(JSON.parse(body));
+    const typed: { value: T } = JSON.parse(body);
+    return { item, value: typed.value };
+  }
+
+  async kvSet(key: string, body: string) {
+    await this.send(`/v1/kv/${segments(key)}`, {
+      method: "PUT",
+      body,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  async kvRemove(key: string) {
+    await this.send(`/v1/kv/${segments(key)}`, { method: "DELETE" });
+  }
+
+  async kvList<T>(prefix: string) {
+    const entries: { key: string; value: T }[] = [];
+    let cursor = "";
+    do {
+      const response = await this.send(`/v1/kv?${new URLSearchParams({ prefix, cursor })}`);
+      const body = await response.text();
+      const page = readKvPage(JSON.parse(body));
+      const typed: { items: { value: T }[] } = JSON.parse(body);
+      page.items.forEach((item, index) => {
+        const entry = typed.items[index];
+        if (entry !== undefined) entries.push({ key: item.key, value: entry.value });
+      });
+      cursor = page.cursor ?? "";
+    } while (cursor !== "");
+    return entries;
+  }
+
+  async logTool(event: {
+    name: string;
+    input: Json | undefined;
+    output: Json | undefined;
+    status: "ok" | "error";
+    durationMs: number;
+    startedAt: string;
+  }) {
+    return readToolEvent(await this.read("/v1/events", json("POST", { op: "tool", ...event })));
+  }
+
+  async toolEvents(cursor: string) {
+    return readEvents(
+      await this.read(`/v1/events?${new URLSearchParams({ op: "tool", limit: "1000", cursor })}`),
+    );
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "import"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error"
+  },
+  "ignorePatterns": ["**/dist/**", "skills/**"],
+  "rules": {
+    "typescript/consistent-type-assertions": ["error", { "assertionStyle": "never" }],
+    "import/no-unassigned-import": "error"
+  },
+  "overrides": [
+    {
+      "files": ["packages/**/*.ts"],
+      "rules": {
+        "eslint/no-await-in-loop": "warn",
+        "eslint/no-shadow": "warn",
+        "eslint/no-underscore-dangle": "warn",
+        "eslint/no-unmodified-loop-condition": "warn",
+        "eslint/preserve-caught-error": "warn",
+        "oxc/no-map-spread": "warn",
+        "typescript/consistent-type-assertions": "warn",
+        "unicorn/consistent-function-scoping": "warn",
+        "unicorn/no-array-reverse": "warn",
+        "unicorn/no-array-sort": "warn",
+        "unicorn/no-useless-spread": "warn",
+        "unicorn/prefer-array-find": "warn",
+        "unicorn/prefer-set-has": "warn"
+      }
+    }
+  ]
+}

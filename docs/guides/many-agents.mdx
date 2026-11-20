@@ -1,0 +1,52 @@
+---
+title: "Many agents"
+description: "Patterns for an orchestrator that runs many agents. Each is one command."
+---
+
+Run `agentfs <command> --help` for the options of any command.
+
+## A scoped key per sub-agent
+
+It opens one folder for one job, and expires. Pass it as `AGENTFS_KEY`. Rotating the full key stops every scoped key.
+
+```bash
+agentfs key create --prefix runs/42/search/ --read --write --ttl 1h
+```
+
+See [Keys and sharing](/guides/keys-and-sharing).
+
+## Watch the work
+
+`agentfs timeline --follow` prints each write as it happens.
+
+## Snapshot before risky work
+
+`agentfs snapshot before-merge runs/42/` costs no bytes. `agentfs diff before-merge` shows what changed. `agentfs restore before-merge` undoes it, and deletes files that were not in the snapshot. See [Snapshots and restore](/guides/snapshots).
+
+## Scratch files expire
+
+```bash
+agentfs put ./scratch --to runs/42/tmp --ttl 1d
+```
+
+The files are deleted after a day.
+
+## A lock across agents
+
+```bash
+agentfs kv set locks/deploy '{"by":"agent-7"}' --create-only --ttl 10m
+```
+
+It succeeds for one caller. The rest fail until it is deleted or expires. See [Key-value store and locks](/guides/kv-and-locks).
+
+## Files in, files out
+
+```bash
+agentfs run --in runs/42/data --out runs/42/out -- python train.py
+```
+
+It pulls the inputs, runs the command, pushes the outputs and prints their links. It exits with the command's exit code. `--in` and `--out` are folders in the current directory, and the same path is used remotely.
+
+## Keep a folder in step
+
+`agentfs sync ./work runs/42/work --watch` mirrors a local folder and a remote one both ways. See [Sync and watch](/guides/sync).

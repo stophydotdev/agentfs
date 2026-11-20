@@ -1,0 +1,54 @@
+---
+title: "Snapshots and restore"
+description: "Save a folder under a name, compare it later, and put it back exactly as it was."
+---
+
+A snapshot records which sha256 each path had. No bytes are copied, so it is instant. The bytes it holds count toward your usage.
+
+## Save one
+
+```bash
+agentfs snapshot before-cleanup runs/42/
+```
+
+The name is 1 to 64 letters, digits, dots, dashes or underscores. The folder is optional. Without it, the snapshot holds every file. A name that is taken returns `snapshot_exists`.
+
+```bash
+agentfs snapshot ls
+agentfs snapshot rm before-cleanup
+```
+
+## See what changed
+
+```bash
+agentfs diff before-cleanup
+agentfs diff before-cleanup after-cleanup
+```
+
+With one name, `diff` compares the snapshot with the current files. With two, it compares the two snapshots. It lists the files added, changed and removed.
+
+## Put it back
+
+```bash
+agentfs restore before-cleanup
+```
+
+The folder then holds exactly the snapshot's files. Files that are not in the snapshot are deleted. Use `--to` to restore into another folder:
+
+```bash
+agentfs restore before-cleanup --to runs/42-copy/
+```
+
+In a script, `restore` asks first and needs `--yes` when there is no terminal.
+
+## The `last` alias
+
+`agentfs restore last` and `agentfs diff last` use the newest snapshot, so you do not need to remember its name.
+
+## Deleted a file by mistake
+
+Deleted bytes are kept for your plan's history, see [Reliability and history](/guides/reliability). `agentfs undelete runs/42/report.html` brings the file back. If a file is at that path now, you get `file_exists`.
+
+## Copy without a snapshot
+
+`agentfs fork runs/42 runs/43` copies a folder to a new folder. Neither folder can sit inside the other. The copy points at the same bytes, so it uses no storage.
