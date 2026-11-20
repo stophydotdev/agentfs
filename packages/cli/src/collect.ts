@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { statSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
@@ -20,7 +20,7 @@ const isIgnored = (folder: string) => {
   }
 };
 
-const isFile = (path: string) => statSync(path, { throwIfNoEntry: false })?.isFile() ?? false;
+const isFile = (path: string) => lstatSync(path, { throwIfNoEntry: false })?.isFile() ?? false;
 
 const gitFiles = (folder: string) => {
   if (isIgnored(folder)) return null;

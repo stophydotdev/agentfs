@@ -1031,3 +1031,9 @@ test("pull reads a private file with the key, because it has no link", async () 
   const read = seen.find(({ path }) => path === "/v1/content/cache/s.txt");
   expect(read?.headers.get("authorization")).toStartWith("Bearer afs_");
 });
+
+test("kv rm with a .. segment is refused instead of deleting a file", async () => {
+  const result = await agentfs("kv", "rm", "../files/victim.txt", "--yes");
+  expect(result.code).not.toBe(0);
+  expect(result.stderr).toContain("not allowed");
+});

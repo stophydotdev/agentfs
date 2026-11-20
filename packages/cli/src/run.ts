@@ -29,6 +29,8 @@ export const exec = (command: string[], timeoutSeconds: number | undefined) =>
         : setTimeout(() => {
             timedOut = true;
             child.kill("SIGTERM");
+            // A command that ignores SIGTERM is killed after 5 seconds so --timeout always returns.
+            setTimeout(() => child.kill("SIGKILL"), 5000).unref();
           }, timeoutSeconds * 1000);
     child.on("error", (error) => {
       clearTimeout(timer);

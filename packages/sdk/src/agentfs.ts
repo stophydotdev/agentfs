@@ -34,13 +34,19 @@ const assertSecure = (url: string) => {
   });
 };
 
+/** A key is one line of printable characters. Anything else would make the HTTP stack echo the key in its error. */
+const checked = (key: string) => {
+  if (/^[!-~]+$/.test(key)) return key;
+  throw new AgentFSError({ code: "EINVAL", message: "EINVAL: the key is not one line without spaces. Make a new key in the dashboard." });
+};
+
 const resolveKey = async (given: string | undefined, url: string) => {
-  if (given !== undefined && given !== "") return given;
+  if (given !== undefined && given !== "") return checked(given);
   const fromEnv = readEnv("AGENTFS_KEY");
-  if (fromEnv !== undefined) return fromEnv;
+  if (fromEnv !== undefined) return checked(fromEnv);
   const file = await openKeyFile();
   const saved = file === null ? null : await file.read();
-  if (saved !== null) return saved;
+  if (saved !== null) return checked(saved);
   if (file !== null && (await file.hasLegacyLogin())) {
     throw new AgentFSError({
       code: "EPERM",

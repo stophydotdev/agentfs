@@ -321,6 +321,10 @@ export const findKey = async (): Promise<{ key: string; source: KeySource } | nu
 
 const loadKey = async (given?: { key: string; source: KeySource }) => {
   const found = given ?? (await findKey());
+  // A key with a line break or space makes fetch echo the whole key in its error.
+  if (found !== null && !/^[!-~]+$/.test(found.key)) {
+    throw new UsageError("the key is not one line without spaces. Make a new key in the dashboard and run agentfs login --key-stdin");
+  }
   if (found !== null) return found;
   if (await hasLegacyLogin()) {
     throw new UsageError(
@@ -354,7 +358,15 @@ const expiry = (ttlSeconds: number | undefined): Record<string, string> =>
 const hiding = (hidden: boolean | undefined): Record<string, string> =>
   hidden === undefined ? {} : { "x-agentfs-private": String(hidden) };
 
-const segments = (path: string) => path.split("/").map(encodeURIComponent).join("/");
+/** Encodes a key or path for a URL. "." and ".." are refused: the URL parser would resolve them into a different route. */
+const segments = (path: string) =>
+  path
+    .split("/")
+    .map((part) => {
+      if (part === "." || part === "..") throw new UsageError(`"${path}" has a "${part}" segment, which is not allowed`);
+      return encodeURIComponent(part);
+    })
+    .join("/");
 
 export const connect = async (given?: { key: string; source: KeySource }) => {
   const { key, source } = await loadKey(given);

@@ -356,3 +356,11 @@ describe("opening", () => {
     expect((await AgentFS.open({ key: KEY, url: stub.url })).url).toBe(stub.url);
   });
 });
+
+test("a key with a line break or a dot segment in a path is refused before any request", async () => {
+  const bad = await caught(AgentFS.open({ key: `${KEY}\nx`, url: stub.url }));
+  expect(bad.code).toBe("EINVAL");
+  expect(bad.message).not.toContain(KEY);
+  const agent = await open();
+  expect((await caught(agent.kv.get("../files/victim.txt"))).code).toBe("EINVAL");
+});
